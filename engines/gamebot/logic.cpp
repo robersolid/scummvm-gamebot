@@ -527,6 +527,16 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 	dispatchEvent(eventCode, param2, param3);
 }
 
+bool Logic::skipPhrase() {
+	if (!_writer.active())
+		return false;
+	g_engine->sounds().stopSound();
+	_writer.update(UINT32_MAX);
+	debugC(kDebugEvents, "Phrase skipped");
+	onPhraseEnded();
+	return true;
+}
+
 void Logic::onPhraseEnded() {
 	g_engine->master().setTalking(false);
 

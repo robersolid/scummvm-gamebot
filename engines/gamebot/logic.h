@@ -159,6 +159,11 @@ public:
 	// talking animation and (eventually) the voice sample
 	void sayPhrase(uint32 textCode, uint32 soundCode);
 
+	// Skips the phrase on screen: the voice stops and the follow-up
+	// chain (next line, answer animation...) runs at once. Returns
+	// false when there was nothing to skip.
+	bool skipPhrase();
+
 	// Conversations (original DialogMaster): a dialog resource holds
 	// sentences the player can pick; a picked line is spoken, may run
 	// an answer animation and reopens the list until a goodbye line

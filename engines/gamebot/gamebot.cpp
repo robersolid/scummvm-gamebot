@@ -177,6 +177,10 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_logic.handleDialogClick(screenPos))
 		return;
 
+	// A click on a spoken line skips it and continues the chain
+	if (_logic.skipPhrase())
+		return;
+
 	// Scripted sequences ignore every player input, as the original
 	// does by disabling the mouse around them
 	if (_logic.isBusy())
