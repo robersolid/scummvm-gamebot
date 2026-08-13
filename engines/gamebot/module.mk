@@ -2,6 +2,7 @@ MODULE := engines/gamebot
 
 MODULE_OBJS = \
 	gamebot.o \
+	character.o \
 	console.o \
 	debug-names.o \
 	metaengine.o \

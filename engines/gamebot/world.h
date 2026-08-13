@@ -34,6 +34,8 @@ class Screen;
 
 namespace Gamebot {
 
+class Character;
+
 // Width in pixels of a walk map cell (rows are bands delimited by the
 // per-row baseY values); from the original Character.cpp
 constexpr int kWalkCellWidth = 30;
@@ -56,6 +58,16 @@ public:
 
 	bool gotoPhase(uint32 phaseId);
 	void update(uint32 millis); // advances animations
+
+	// Walk map access for the characters
+	bool hasWalkMap() const { return _mapWidth != 0; }
+	uint mapWidth() const { return _mapWidth; }
+	uint mapHeight() const { return _mapHeight; }
+	byte mapCell(int x, int y) const { return _mapCells[y * _mapWidth + x]; }
+	byte mapCellByIndex(uint index) const { return _mapCells[index]; }
+	uint16 mapBaseY(int row) const { return _mapBaseY[row]; }
+	uint16 mapScale(int row) const { return _mapScale[row]; }
+	int walkRowAt(const Common::Point &pos) const;
 	uint animatedCount() const {
 		uint n = 0;
 		for (uint i = 0; i < _items.size(); i++)
@@ -63,7 +75,9 @@ public:
 				n++;
 		return n;
 	}
-	void draw(Graphics::Screen *screen);
+	// Draws the phase; the actor (if any) is interleaved into the
+	// layer order according to its current layer
+	void draw(Graphics::Screen *screen, const Character *actor = nullptr);
 
 	// Pixel-perfect test in phase coordinates, front to back
 	bool hitTest(const Common::Point &pos, HitResult &result) const;
@@ -76,6 +90,7 @@ public:
 	// Debug overlay toggles
 	bool _showWalkMap = false;
 	bool _showHotspots = false;
+	bool _showPath = false;
 
 private:
 	// One automatic animation of an object. Every auto animation of an
@@ -97,6 +112,7 @@ private:
 
 	struct DrawItem {
 		uint32 objectId = 0;
+		uint16 layer = 0;        // phase layer the object lives in
 		Common::String name;
 		Common::Rect rect;       // static image rect, absolute phase coords
 		byte *staticPixels = nullptr; // owned; may be null if animation-only
@@ -134,9 +150,10 @@ private:
 	void clear();
 	bool loadPhaseInit(uint32 phaseId);
 	void loadWalkMap(uint32 phaseId);
-	void addDrawItem(const ObjectEntry &object);
+	void addDrawItem(const ObjectEntry &object, uint16 layer);
 	bool loadAnimation(const ResourceEntry &e, Animation &anim);
 	void updateItem(DrawItem &item, uint32 millis);
+	void drawPathOverlay(Graphics::Screen *screen, const Character *actor) const;
 	void drawWalkMapOverlay(Graphics::Screen *screen) const;
 	void drawHotspotOverlay(Graphics::Screen *screen) const;
 

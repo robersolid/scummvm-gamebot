@@ -99,16 +99,37 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	Common::Point phasePos(screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
 	HitResult hit;
 	if (!_world.hitTest(phasePos, hit)) {
-		debugC(kDebugEvents, "Click on nothing at (%d,%d)", phasePos.x, phasePos.y);
+		// Clicking the floor walks there
+		debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
+		_mortadelo.walkTo(_world, phasePos);
 		return;
 	}
 
 	debugC(kDebugEvents, "Click on %08x '%s' (%s)", hit.objectId, hit.name.c_str(),
 		resourceTypeName(hit.type));
 
-	// Phase exits already work: walking there comes with the characters
-	if (hit.exitPhase && _world.gotoPhase(hit.exitPhase))
+	if (hit.exitPhase && gotoPhase(hit.exitPhase))
 		debugC(kDebugEvents, "Exit taken to phase %08x", hit.exitPhase);
+}
+
+bool GamebotEngine::gotoPhase(uint32 phaseId) {
+	if (!_world.gotoPhase(phaseId))
+		return false;
+
+	// Place the characters at the phase entry location
+	int phaseIndex = _initialWorld.findPhase(phaseId);
+	if (phaseIndex >= 0 && _mortadelo.isLoaded()) {
+		const PhaseEntry &phase = _initialWorld.phase(phaseIndex);
+		const CharacterLocation *location = &phase.chars[0];
+		for (uint i = 0; i < 2; i++) {
+			if (phase.chars[i].characterId == _mortadelo.objectId())
+				location = &phase.chars[i];
+		}
+		_mortadelo.visible = location->x || location->y;
+		if (_mortadelo.visible)
+			_mortadelo.enterPhase(_world, *location);
+	}
+	return true;
 }
 
 uint32 GamebotEngine::getFeatures() const {
@@ -135,6 +156,8 @@ Common::Error GamebotEngine::run() {
 	if (!loadDataFiles())
 		return Common::kNoGameDataFoundError;
 
+	_mortadelo.load(kCharMortadelo);
+
 	// Development aid: run semicolon-separated console commands from
 	// the config file, e.g. gamebot_exec=phases;dumpmap 0x0101
 	if (ConfMan.hasKey("gamebot_exec")) {
@@ -151,7 +174,7 @@ Common::Error GamebotEngine::run() {
 	// Show something real until the script system decides the phase:
 	// the chapter 1 map screen
 	if (!_world.currentPhaseId())
-		_world.gotoPhase(0x101);
+		gotoPhase(0x101);
 
 	// Standard and hot cursor of the original mouse handler
 	loadCursor(0x00030001, _standardCursor);
@@ -184,8 +207,23 @@ Common::Error GamebotEngine::run() {
 			}
 		}
 
-		_world.update(g_system->getMillis());
-		_world.draw(_screen);
+		uint32 millis = g_system->getMillis();
+		_world.update(millis);
+		_mortadelo.tick(millis, _world);
+
+		// Camera follows the master character on wide phases,
+		// at most 5 pixels per frame (original Character::Redraw)
+		if (_mortadelo.isLoaded() && _world.phaseWidth() > kScreenWidth) {
+			int maxOrigin = _world.phaseWidth() - kScreenWidth;
+			int screenCenter = kScreenWidth / 2 + _world.origin().x;
+			int diff = _mortadelo.x() - screenCenter;
+			if (diff > 0)
+				_world.origin().x = MIN<int16>(_world.origin().x + MIN(5, diff), maxOrigin);
+			else if (diff < 0)
+				_world.origin().x = MAX<int16>(_world.origin().x - MIN(5, -diff), 0);
+		}
+
+		_world.draw(_screen, &_mortadelo);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();

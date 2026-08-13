@@ -29,6 +29,7 @@
 #include "engines/engine.h"
 #include "graphics/screen.h"
 
+#include "gamebot/character.h"
 #include "gamebot/detection.h"
 #include "gamebot/resource.h"
 #include "gamebot/world.h"
@@ -56,6 +57,7 @@ private:
 	ActionFile _actions;        // Actions.act: per-object action rules
 	WorldFile _initialWorld;    // default.def: world state for a new game
 	World _world;               // runtime world (current phase)
+	Character _mortadelo;       // the player character (master)
 
 	// Loads the data file indexes. Returns false if a mandatory file
 	// is missing or corrupt.
@@ -93,6 +95,10 @@ public:
 	ActionFile &actions() { return _actions; }
 	WorldFile &initialWorld() { return _initialWorld; }
 	World &world() { return _world; }
+	Character &mortadelo() { return _mortadelo; }
+
+	// Loads a phase and places the characters at its entry positions
+	bool gotoPhase(uint32 phaseId);
 
 	uint32 getRandomNumber(uint maxNum) {
 		return _randomSource.getRandomNumber(maxNum);

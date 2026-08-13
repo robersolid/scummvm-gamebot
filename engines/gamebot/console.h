@@ -46,6 +46,9 @@ private:
 	bool cmdScreenshot(int argc, const char **argv);
 	bool cmdOverlay(int argc, const char **argv);
 	bool cmdWait(int argc, const char **argv);
+	bool cmdWalk(int argc, const char **argv);
+	bool cmdTeleport(int argc, const char **argv);
+	bool cmdCharInfo(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
 	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,

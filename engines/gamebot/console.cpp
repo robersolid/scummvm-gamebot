@@ -72,7 +72,57 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("screenshot", WRAP_METHOD(Console, cmdScreenshot));
 	registerCmd("showwalkmap", WRAP_METHOD(Console, cmdOverlay));
 	registerCmd("showhotspots", WRAP_METHOD(Console, cmdOverlay));
+	registerCmd("showpath", WRAP_METHOD(Console, cmdOverlay));
 	registerCmd("wait", WRAP_METHOD(Console, cmdWait));
+	registerCmd("walk", WRAP_METHOD(Console, cmdWalk));
+	registerCmd("tp", WRAP_METHOD(Console, cmdTeleport));
+	registerCmd("charinfo", WRAP_METHOD(Console, cmdCharInfo));
+}
+
+bool Console::cmdWalk(int argc, const char **argv) {
+	if (argc < 3) {
+		debugPrintf("Usage: walk <x> <y>\n");
+		return true;
+	}
+	Common::Point target((int16)atoi(argv[1]), (int16)atoi(argv[2]));
+	if (g_engine->mortadelo().walkTo(g_engine->world(), target))
+		debugPrintf("Walking to (%d,%d), %u steps\n", target.x, target.y,
+			g_engine->mortadelo().path().size());
+	else
+		debugPrintf("No path to (%d,%d)\n", target.x, target.y);
+	return true;
+}
+
+bool Console::cmdTeleport(int argc, const char **argv) {
+	if (argc < 3) {
+		debugPrintf("Usage: tp <x> <y> [layer]\n");
+		return true;
+	}
+	Character &character = g_engine->mortadelo();
+	World &world = g_engine->world();
+	int16 x = (int16)atoi(argv[1]), y = (int16)atoi(argv[2]);
+	uint16 layer = (argc > 3) ? (uint16)atoi(argv[3])
+		: (world.hasWalkMap() ? (uint16)(world.mapHeight() + 2 - world.walkRowAt(Common::Point(x, y))) : character.layer());
+	CharacterLocation location;
+	location.characterId = character.objectId();
+	location.x = x;
+	location.y = y;
+	location.orientation = character.orientation();
+	location.layer = layer;
+	character.enterPhase(world, location);
+	character.visible = true;
+	debugPrintf("Teleported to (%d,%d) L%u\n", x, y, layer);
+	return true;
+}
+
+bool Console::cmdCharInfo(int argc, const char **argv) {
+	Character &c = g_engine->mortadelo();
+	debugPrintf("Character %08x: pos (%d,%d) L%u or%u scale %u%% %s%s\n",
+		c.objectId(), c.x(), c.y(), c.layer(), c.orientation(), c.scale() / 10,
+		c.isWalking() ? "walking" : "idle", c.visible ? "" : " (hidden)");
+	if (c.isWalking())
+		debugPrintf("Path: step %u of %u\n", c.pathPosition(), c.path().size());
+	return true;
 }
 
 // Advances world time for scripted validation runs (gamebot_exec)
@@ -80,8 +130,10 @@ bool Console::cmdWait(int argc, const char **argv) {
 	uint32 duration = (argc > 1) ? strtoul(argv[1], nullptr, 0) : 1000;
 	uint32 end = g_system->getMillis() + duration;
 	while (g_system->getMillis() < end && !g_engine->shouldQuit()) {
-		g_engine->world().update(g_system->getMillis());
-		g_engine->world().draw(g_engine->_screen);
+		uint32 millis = g_system->getMillis();
+		g_engine->world().update(millis);
+		g_engine->mortadelo().tick(millis, g_engine->world());
+		g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
 		g_engine->_screen->update();
 		g_system->delayMillis(10);
 	}
@@ -89,8 +141,9 @@ bool Console::cmdWait(int argc, const char **argv) {
 }
 
 bool Console::cmdOverlay(int argc, const char **argv) {
-	bool &flag = !strcmp(argv[0], "showwalkmap")
-		? g_engine->world()._showWalkMap : g_engine->world()._showHotspots;
+	World &world = g_engine->world();
+	bool &flag = !strcmp(argv[0], "showwalkmap") ? world._showWalkMap
+		: !strcmp(argv[0], "showpath") ? world._showPath : world._showHotspots;
 	flag = (argc > 1) ? atoi(argv[1]) != 0 : !flag;
 	debugPrintf("%s = %d\n", argv[0], flag);
 	return true;
@@ -479,7 +532,7 @@ bool Console::cmdGoto(int argc, const char **argv) {
 		return true;
 	}
 	uint32 phaseId = parseId(argv[1]);
-	if (g_engine->world().gotoPhase(phaseId))
+	if (g_engine->gotoPhase(phaseId))
 		debugPrintf("Now in phase %08x (%dx%d)\n", phaseId,
 			g_engine->world().phaseWidth(), g_engine->world().phaseHeight());
 	else
@@ -504,7 +557,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	Common::String fileName = (argc > 1) ? argv[1] : "gamebot-dumps/screenshot.bmp";
 
 	// Render a fresh frame and save it with the current system palette
-	g_engine->world().draw(g_engine->_screen);
+	g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
 	byte palette[256 * 3];
 	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
 

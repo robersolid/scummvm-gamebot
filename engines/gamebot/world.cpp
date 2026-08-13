@@ -25,6 +25,7 @@
 #include "graphics/paletteman.h"
 #include "graphics/screen.h"
 
+#include "gamebot/character.h"
 #include "gamebot/debug-names.h"
 #include "gamebot/gamebot.h"
 #include "gamebot/world.h"
@@ -129,12 +130,20 @@ void World::loadWalkMap(uint32 phaseId) {
 // animation registers its own timer; when it fires it becomes the
 // object's active resource and plays. Event-triggered animations
 // stay dormant until the action system starts them.
-void World::addDrawItem(const ObjectEntry &object) {
+void World::addDrawItem(const ObjectEntry &object, uint16 layer) {
+	// Generic system objects (writer, inventory, fx, changer...) have
+	// custom draw paths in the original engine: the inventory image,
+	// for instance, is only drawn while the inventory is open. They
+	// are skipped until those subsystems exist.
+	if (object.objectId < 0x100)
+		return;
+
 	ResourceFile &res = g_engine->resources();
 	const int first = res.findObject(object.objectId);
 
 	DrawItem item;
 	item.objectId = object.objectId;
+	item.layer = layer;
 	item.name = object.name;
 
 	for (int i = first; i >= 0 && i < (int)res.count() &&
@@ -267,7 +276,7 @@ bool World::gotoPhase(uint32 phaseId) {
 	for (int l = (int)phase.layerCount - 1; l >= 1; l--) {
 		const LayerEntry &layer = world.layer(phase.layerFirst + l);
 		for (uint o = 0; o < layer.objectCount; o++)
-			addDrawItem(world.object(layer.objectFirst + o));
+			addDrawItem(world.object(layer.objectFirst + o), (uint16)l);
 	}
 
 	debugC(kDebugResources, "Phase %08x loaded: %u draw items, %u hotspots, map %ux%u",
@@ -400,18 +409,55 @@ static void blitItem(Graphics::Screen *screen, const byte *pixels,
 	}
 }
 
-void World::draw(Graphics::Screen *screen) {
+void World::draw(Graphics::Screen *screen, const Character *actor) {
 	screen->clear(kTransparentColor);
+
+	// Items are ordered by descending layer. The actor draws after
+	// all items of its own layer: the original engine inserts the
+	// character at the end of its layer's object list.
+	bool actorDrawn = (actor == nullptr) || !actor->isLoaded();
 	for (uint i = 0; i < _items.size(); i++) {
+		if (!actorDrawn && _items[i].layer < actor->layer()) {
+			actor->draw(screen, _origin);
+			actorDrawn = true;
+		}
 		if (_items[i].visible)
 			blitItem(screen, _items[i].currentPixels(), _items[i].currentRect(), _origin);
 	}
+	if (!actorDrawn)
+		actor->draw(screen, _origin);
 
 	if (_showWalkMap)
 		drawWalkMapOverlay(screen);
 	if (_showHotspots)
 		drawHotspotOverlay(screen);
+	if (_showPath && actor)
+		drawPathOverlay(screen, actor);
 	screen->markAllDirty();
+}
+
+int World::walkRowAt(const Common::Point &pos) const {
+	if (!_mapWidth)
+		return -1;
+	int x = MIN<int>(pos.x / kWalkCellWidth, _mapWidth - 1);
+	for (uint y = 0; y < _mapHeight; y++) {
+		byte cell = mapCell(x, y);
+		int disp = cell & kCellDisplacementMask;
+		if (cell & kCellDisplacementSign)
+			disp = -disp;
+		if (pos.y - disp <= _mapBaseY[y])
+			return (int)y;
+	}
+	return (int)_mapHeight - 1;
+}
+
+void World::drawPathOverlay(Graphics::Screen *screen, const Character *actor) const {
+	const Common::Array<WalkStep> &path = actor->path();
+	for (uint i = actor->pathPosition(); i < path.size(); i++) {
+		int sx = path[i].x - _origin.x, sy = path[i].y - _origin.y;
+		if (sx >= 0 && sx < screen->w && sy >= 0 && sy < screen->h)
+			*(byte *)screen->getBasePtr(sx, sy) = kOverlayWalkColor;
+	}
 }
 
 void World::drawWalkMapOverlay(Graphics::Screen *screen) const {
