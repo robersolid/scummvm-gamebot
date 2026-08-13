@@ -60,6 +60,7 @@ private:
 	bool cmdPlayFlic(int argc, const char **argv);
 	bool cmdDumpFlic(int argc, const char **argv);
 	bool cmdSaveSlot(int argc, const char **argv);
+	bool cmdMaster(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
 	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,

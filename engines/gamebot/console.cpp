@@ -95,6 +95,13 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("dumpflic", WRAP_METHOD(Console, cmdDumpFlic));
 	registerCmd("saveslot", WRAP_METHOD(Console, cmdSaveSlot));
 	registerCmd("loadslot", WRAP_METHOD(Console, cmdSaveSlot));
+	registerCmd("master", WRAP_METHOD(Console, cmdMaster));
+}
+
+bool Console::cmdMaster(int argc, const char **argv) {
+	g_engine->switchMaster();
+	debugPrintf("Master is now %08x\n", g_engine->master().objectId());
+	return true;
 }
 
 bool Console::cmdSaveSlot(int argc, const char **argv) {
@@ -327,9 +334,9 @@ bool Console::cmdWalk(int argc, const char **argv) {
 		return true;
 	}
 	Common::Point target((int16)atoi(argv[1]), (int16)atoi(argv[2]));
-	if (g_engine->mortadelo().walkTo(g_engine->world(), target))
+	if (g_engine->master().walkTo(g_engine->world(), target))
 		debugPrintf("Walking to (%d,%d), %u steps\n", target.x, target.y,
-			g_engine->mortadelo().path().size());
+			g_engine->master().path().size());
 	else
 		debugPrintf("No path to (%d,%d)\n", target.x, target.y);
 	return true;
@@ -340,7 +347,7 @@ bool Console::cmdTeleport(int argc, const char **argv) {
 		debugPrintf("Usage: tp <x> <y> [layer]\n");
 		return true;
 	}
-	Character &character = g_engine->mortadelo();
+	Character &character = g_engine->master();
 	World &world = g_engine->world();
 	int16 x = (int16)atoi(argv[1]), y = (int16)atoi(argv[2]);
 	uint16 layer = (argc > 3) ? (uint16)atoi(argv[3])
@@ -358,7 +365,7 @@ bool Console::cmdTeleport(int argc, const char **argv) {
 }
 
 bool Console::cmdCharInfo(int argc, const char **argv) {
-	Character &c = g_engine->mortadelo();
+	Character &c = g_engine->master();
 	debugPrintf("Character %08x: pos (%d,%d) L%u or%u scale %u%% %s%s\n",
 		c.objectId(), c.x(), c.y(), c.layer(), c.orientation(), c.scale() / 10,
 		c.isWalking() ? "walking" : "idle", c.visible ? "" : " (hidden)");
@@ -374,9 +381,11 @@ bool Console::cmdWait(int argc, const char **argv) {
 	while (g_system->getMillis() < end && !g_engine->shouldQuit()) {
 		uint32 millis = g_system->getMillis();
 		g_engine->world().update(millis);
-		g_engine->mortadelo().tick(millis, g_engine->world());
+		g_engine->master().tick(millis, g_engine->world());
+		if (g_engine->secondCharacter())
+			const_cast<Character *>(g_engine->secondCharacter())->tick(millis, g_engine->world());
 		g_engine->logic().update(millis);
-		g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
+		g_engine->world().draw(g_engine->_screen, &g_engine->master(), g_engine->secondCharacter());
 		g_engine->logic().writer().draw(g_engine->_screen);
 		g_engine->logic().drawDialog(g_engine->_screen);
 		g_engine->verbPalette().draw(g_engine->_screen);
@@ -804,7 +813,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	Common::String fileName = (argc > 1) ? argv[1] : "gamebot-dumps/screenshot.bmp";
 
 	// Render a fresh frame and save it with the current system palette
-	g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
+	g_engine->world().draw(g_engine->_screen, &g_engine->master(), g_engine->secondCharacter());
 	g_engine->logic().writer().draw(g_engine->_screen);
 	g_engine->logic().drawDialog(g_engine->_screen);
 	g_engine->verbPalette().draw(g_engine->_screen);

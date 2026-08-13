@@ -201,7 +201,7 @@ void Logic::interactWith(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 	_pendingActive = true;
 
 	// Walk to the object's interaction point; the verb runs on arrival
-	Character &character = g_engine->mortadelo();
+	Character &character = g_engine->master();
 	if (object->targetX || object->targetY)
 		character.walkTo(g_engine->world(), Common::Point(object->targetX, object->targetY));
 	debugC(kDebugActions, "Walking to %08x '%s' for verb %d",
@@ -295,7 +295,7 @@ void Logic::sayGenericResponse(uint32 verbEventId, uint16 responseFlags) {
 		code = kResponses[index][g_engine->getRandomNumber(8)];
 
 	// Phrase codes belong to the master character's own resources
-	uint32 textCode = ((g_engine->mortadelo().objectId() << 8) & 0xffff0000) | code;
+	uint32 textCode = ((g_engine->master().objectId() << 8) & 0xffff0000) | code;
 	sayPhrase(textCode, textCode - 0x100);
 }
 
@@ -305,7 +305,7 @@ void Logic::sayPhrase(uint32 textCode, uint32 soundCode) {
 		_phraseSound = soundCode;
 		g_engine->sounds().playSound(soundCode);
 	}
-	g_engine->mortadelo().setTalking(_writer.active());
+	g_engine->master().setTalking(_writer.active());
 }
 
 void Logic::update(uint32 millis) {
@@ -319,7 +319,7 @@ void Logic::update(uint32 millis) {
 		onPhraseEnded();
 
 	// Fire the pending verb when the character arrives
-	if (_pendingActive && !g_engine->mortadelo().isWalking()) {
+	if (_pendingActive && !g_engine->master().isWalking()) {
 		_pendingActive = false;
 		performVerb(_pendingObject, _pendingVerb, _pendingLinked);
 	}
@@ -478,7 +478,7 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 }
 
 void Logic::onPhraseEnded() {
-	g_engine->mortadelo().setTalking(false);
+	g_engine->master().setTalking(false);
 
 	// The original signals the end of a spoken phrase with an
 	// AnimEnded event carrying the voice code, which rules use to

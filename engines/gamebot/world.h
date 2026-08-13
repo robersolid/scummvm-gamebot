@@ -84,9 +84,10 @@ public:
 				n++;
 		return n;
 	}
-	// Draws the phase; the actor (if any) is interleaved into the
-	// layer order according to its current layer
-	void draw(Graphics::Screen *screen, const Character *actor = nullptr);
+	// Draws the phase; the actors (if any) are interleaved into the
+	// layer order according to their current layers
+	void draw(Graphics::Screen *screen, const Character *actor = nullptr,
+		const Character *partner = nullptr);
 
 	// Pixel-perfect test in phase coordinates, front to back
 	bool hitTest(const Common::Point &pos, HitResult &result) const;

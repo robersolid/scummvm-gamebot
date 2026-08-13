@@ -482,23 +482,41 @@ static void blitItem(Graphics::Screen *screen, const byte *pixels,
 	}
 }
 
-void World::draw(Graphics::Screen *screen, const Character *actor) {
+void World::draw(Graphics::Screen *screen, const Character *actor,
+		const Character *partner) {
 	screen->clear(kTransparentColor);
 
-	// Items are ordered by descending layer. The actor draws after
-	// all items of its own layer: the original engine inserts the
-	// character at the end of its layer's object list.
-	bool actorDrawn = (actor == nullptr) || !actor->isLoaded();
+	// Items are ordered by descending layer. Each character draws
+	// after all items of its own layer: the original engine inserts
+	// them at the end of their layer's object list. When both share
+	// a layer the one lower on screen draws in front.
+	const Character *actors[2] = { actor, partner };
+	if (actor && partner && partner->layer() > actor->layer()) {
+		actors[0] = partner;
+		actors[1] = actor;
+	} else if (actor && partner && partner->layer() == actor->layer() &&
+			partner->y() > actor->y()) {
+		actors[0] = actor;
+		actors[1] = partner;
+	}
+	bool drawn[2];
+	for (uint a = 0; a < 2; a++)
+		drawn[a] = !actors[a] || !actors[a]->isLoaded() || !actors[a]->visible;
+
 	for (uint i = 0; i < _items.size(); i++) {
-		if (!actorDrawn && _items[i].layer < actor->layer()) {
-			actor->draw(screen, _origin);
-			actorDrawn = true;
+		for (uint a = 0; a < 2; a++) {
+			if (!drawn[a] && _items[i].layer < actors[a]->layer()) {
+				actors[a]->draw(screen, _origin);
+				drawn[a] = true;
+			}
 		}
 		if (_items[i].visible)
 			blitItem(screen, _items[i].currentPixels(), _items[i].currentRect(), _origin);
 	}
-	if (!actorDrawn)
-		actor->draw(screen, _origin);
+	for (uint a = 0; a < 2; a++) {
+		if (!drawn[a])
+			actors[a]->draw(screen, _origin);
+	}
 
 	if (_showWalkMap)
 		drawWalkMapOverlay(screen);

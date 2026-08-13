@@ -138,7 +138,7 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 		// Clicking the floor walks there
 		debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
 		_linkedObject = 0;
-		_mortadelo.walkTo(_world, phasePos);
+		master().walkTo(_world, phasePos);
 		return;
 	}
 
@@ -231,6 +231,18 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 	return true;
 }
 
+// Toggles control between Mortadelo and Filemon when both are in
+// the phase (the original ChangerMaster swap)
+void GamebotEngine::switchMaster() {
+	if (_master == &_mortadelo && _filemon.visible && _filemon.isLoaded())
+		_master = &_filemon;
+	else if (_master == &_filemon && _mortadelo.visible && _mortadelo.isLoaded())
+		_master = &_mortadelo;
+	else
+		return;
+	debugC(kDebugEvents, "Master is now %08x", _master->objectId());
+}
+
 bool GamebotEngine::gotoPhase(uint32 phaseId) {
 	if (!_world.gotoPhase(phaseId))
 		return false;
@@ -238,18 +250,31 @@ bool GamebotEngine::gotoPhase(uint32 phaseId) {
 	// Rule-driven object changes persist across phase loads
 	_logic.applyObjectStates();
 
-	// Place the characters at the phase entry location
+	// Place the characters at their phase entry locations: a phase
+	// either hosts Mortadelo and Filemon or the combined character
 	int phaseIndex = _initialWorld.findPhase(phaseId);
-	if (phaseIndex >= 0 && _mortadelo.isLoaded()) {
+	if (phaseIndex >= 0) {
 		const PhaseEntry &phase = _initialWorld.phase(phaseIndex);
-		const CharacterLocation *location = &phase.chars[0];
+		_mortadelo.visible = _filemon.visible = _both.visible = false;
 		for (uint i = 0; i < 2; i++) {
-			if (phase.chars[i].characterId == _mortadelo.objectId())
-				location = &phase.chars[i];
+			const CharacterLocation &location = phase.chars[i];
+			Character *character =
+				(location.characterId == _mortadelo.objectId()) ? &_mortadelo :
+				(location.characterId == _filemon.objectId()) ? &_filemon :
+				(location.characterId == _both.objectId()) ? &_both : nullptr;
+			if (!character || !character->isLoaded() || !(location.x || location.y))
+				continue;
+			character->visible = true;
+			character->enterPhase(_world, location);
 		}
-		_mortadelo.visible = location->x || location->y;
-		if (_mortadelo.visible)
-			_mortadelo.enterPhase(_world, *location);
+		// The combined character rules the map screens; otherwise
+		// keep the current master if present, defaulting to Mortadelo
+		if (_both.visible)
+			_master = &_both;
+		else if (_mortadelo.visible && (_master == &_both || !_master->visible))
+			_master = &_mortadelo;
+		else if (!_master->visible && _filemon.visible)
+			_master = &_filemon;
 	}
 
 	// Phases can carry full-screen videos (the logo and intro chain);
@@ -303,6 +328,8 @@ Common::Error GamebotEngine::run() {
 		return Common::kNoGameDataFoundError;
 
 	_mortadelo.load(kCharMortadelo);
+	_filemon.load(kCharFilemon);
+	_both.load(kCharBoth);
 
 	// Development aid: run semicolon-separated console commands from
 	// the config file, e.g. gamebot_exec=phases;dumpmap 0x0101
@@ -357,6 +384,8 @@ Common::Error GamebotEngine::run() {
 						MAX(0, _world.phaseWidth() - kScreenWidth));
 				else if (e.kbd.keycode == Common::KEYCODE_LEFT)
 					_world.origin().x = MAX<int16>(_world.origin().x - 16, 0);
+				else if (e.kbd.keycode == Common::KEYCODE_TAB)
+					switchMaster();
 				break;
 			default:
 				break;
@@ -366,21 +395,23 @@ Common::Error GamebotEngine::run() {
 		uint32 millis = g_system->getMillis();
 		_world.update(millis);
 		_mortadelo.tick(millis, _world);
+		_filemon.tick(millis, _world);
+		_both.tick(millis, _world);
 		_logic.update(millis);
 
 		// Camera follows the master character on wide phases,
 		// at most 5 pixels per frame (original Character::Redraw)
-		if (_mortadelo.isLoaded() && _world.phaseWidth() > kScreenWidth) {
+		if (master().isLoaded() && _world.phaseWidth() > kScreenWidth) {
 			int maxOrigin = _world.phaseWidth() - kScreenWidth;
 			int screenCenter = kScreenWidth / 2 + _world.origin().x;
-			int diff = _mortadelo.x() - screenCenter;
+			int diff = master().x() - screenCenter;
 			if (diff > 0)
 				_world.origin().x = MIN<int16>(_world.origin().x + MIN(5, diff), maxOrigin);
 			else if (diff < 0)
 				_world.origin().x = MAX<int16>(_world.origin().x - MIN(5, -diff), 0);
 		}
 
-		_world.draw(_screen, &_mortadelo);
+		_world.draw(_screen, &master(), secondCharacter());
 		_logic.writer().draw(_screen);
 		_logic.drawDialog(_screen);
 		_verbPalette.draw(_screen);
@@ -398,9 +429,11 @@ Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
 		return Common::kUnknownError;
 
 	uint32 phaseId = _world.currentPhaseId();
-	int16 x = _mortadelo.x(), y = _mortadelo.y();
-	uint16 orient = _mortadelo.orientation(), layer = _mortadelo.layer();
+	uint32 masterId = master().objectId();
+	int16 x = master().x(), y = master().y();
+	uint16 orient = master().orientation(), layer = master().layer();
 	s.syncAsUint32LE(phaseId);
+	s.syncAsUint32LE(masterId);
 	s.syncAsSint16LE(x);
 	s.syncAsSint16LE(y);
 	s.syncAsUint16LE(orient);
@@ -412,14 +445,16 @@ Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
 		if (!_world.gotoPhase(phaseId))
 			return Common::kUnknownError;
 		_logic.applyObjectStates();
+		_master = (masterId == _filemon.objectId()) ? &_filemon :
+			(masterId == _both.objectId()) ? &_both : &_mortadelo;
 		CharacterLocation location;
-		location.characterId = _mortadelo.objectId();
+		location.characterId = masterId;
 		location.x = x;
 		location.y = y;
 		location.orientation = orient;
 		location.layer = layer;
-		_mortadelo.enterPhase(_world, location);
-		_mortadelo.visible = true;
+		master().enterPhase(_world, location);
+		master().visible = true;
 		debugC(kDebugSaves, "Game loaded: phase %08x, character at (%d,%d)", phaseId, x, y);
 	} else {
 		debugC(kDebugSaves, "Game saved: phase %08x, character at (%d,%d)", phaseId, x, y);

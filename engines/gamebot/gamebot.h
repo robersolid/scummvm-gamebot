@@ -61,7 +61,11 @@ private:
 	ActionFile _actions;        // Actions.act: per-object action rules
 	WorldFile _initialWorld;    // default.def: world state for a new game
 	World _world;               // runtime world (current phase)
-	Character _mortadelo;       // the player character (master)
+	// The three playable characters: Mortadelo, Filemon and the
+	// combined "both" sprite used on the map screens. The master is
+	// the one the player controls.
+	Character _mortadelo, _filemon, _both;
+	Character *_master = &_mortadelo;
 	Logic _logic;               // action rules, inventory, phrases
 	VerbPalette _verbPalette;   // pop-up verb selection
 	InventoryUI _inventoryUI;   // the safe with the collected objects
@@ -108,6 +112,17 @@ public:
 	WorldFile &initialWorld() { return _initialWorld; }
 	World &world() { return _world; }
 	Character &mortadelo() { return _mortadelo; }
+	Character &filemon() { return _filemon; }
+	Character &master() { return *_master; }
+	const Character *secondCharacter() const {
+		// The visible non-master partner, if any
+		if (_master != &_mortadelo && _mortadelo.visible && _mortadelo.isLoaded())
+			return &_mortadelo;
+		if (_master != &_filemon && _filemon.visible && _filemon.isLoaded())
+			return &_filemon;
+		return nullptr;
+	}
+	void switchMaster();
 	Logic &logic() { return _logic; }
 	VerbPalette &verbPalette() { return _verbPalette; }
 	InventoryUI &inventoryUI() { return _inventoryUI; }
