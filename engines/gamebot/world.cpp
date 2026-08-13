@@ -25,12 +25,13 @@
 #include "graphics/paletteman.h"
 #include "graphics/screen.h"
 
+#include "gamebot/debug-names.h"
 #include "gamebot/gamebot.h"
 #include "gamebot/world.h"
 
 namespace Gamebot {
 
-// Colors 0 is transparent in every image
+// Color 0 is transparent in every image
 static const byte kTransparentColor = 0;
 
 // Palette indexes used by the debug overlays; late entries chosen as
@@ -41,8 +42,11 @@ static const byte kOverlayHotspotColor = 253;
 static const byte kOverlayExitColor = 252;
 
 void World::clear() {
-	for (uint i = 0; i < _items.size(); i++)
-		delete[] _items[i].pixels;
+	for (uint i = 0; i < _items.size(); i++) {
+		delete[] _items[i].staticPixels;
+		for (uint a = 0; a < _items[i].anims.size(); a++)
+			delete[] _items[i].anims[a].frames;
+	}
 	_items.clear();
 	_hotspots.clear();
 	_mapCells.clear();
@@ -120,71 +124,127 @@ void World::loadWalkMap(uint32 phaseId) {
 	delete[] data;
 }
 
-// Picks the object's statically visible resource, if any: a plain
-// image or the first frame of an automatic animation. Event-triggered
-// animations stay dormant until the action system starts them.
+// Collects the object's visible resources: an optional static image
+// plus every automatic animation. In the original engine each auto
+// animation registers its own timer; when it fires it becomes the
+// object's active resource and plays. Event-triggered animations
+// stay dormant until the action system starts them.
 void World::addDrawItem(const ObjectEntry &object) {
 	ResourceFile &res = g_engine->resources();
-	int i = res.findObject(object.objectId);
+	const int first = res.findObject(object.objectId);
 
-	for (; i >= 0 && i < (int)res.count() && res.entry(i).objectId == object.objectId; i++) {
+	DrawItem item;
+	item.objectId = object.objectId;
+	item.name = object.name;
+
+	for (int i = first; i >= 0 && i < (int)res.count() &&
+			res.entry(i).objectId == object.objectId; i++) {
 		const ResourceEntry &e = res.entry(i);
 
-		// Collect interaction areas for the hotspot overlay while at it
+		// Collect interaction areas for hit tests and the overlay
 		if (e.type == kResHiddenImage || e.type == kResPhaseExit || e.type == kResMapExit) {
 			byte *data = res.readBlob(e);
 			if (data) {
 				Hotspot hotspot;
 				hotspot.objectId = object.objectId;
+				hotspot.name = object.name;
 				hotspot.type = e.type;
 				hotspot.rect = Common::Rect(
 					READ_LE_INT32(data), READ_LE_INT32(data + 4),
 					READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+				if (e.type != kResHiddenImage && e.size >= 16 + 4)
+					hotspot.exitPhase = READ_LE_UINT32(data + 16);
 				_hotspots.push_back(hotspot);
 				delete[] data;
 			}
 			continue;
 		}
 
-		bool isImage = e.type == kResImage;
-		bool isAutoAnimation = e.type == kResAnimationAuto || e.type == kResAnimationAutoMobile;
-		if (!isImage && !isAutoAnimation)
-			continue;
-
-		byte *data = res.readBlob(e);
-		if (!data)
-			continue;
-
-		DrawItem item;
-		item.objectId = object.objectId;
-		item.resId = e.resId;
-		item.rect = Common::Rect(
-			READ_LE_INT32(data), READ_LE_INT32(data + 4),
-			READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
-		const uint32 pixelCount = item.rect.width() * item.rect.height();
-		item.pixels = new byte[pixelCount];
-
-		if (isImage) {
-			memcpy(item.pixels, data + 16, pixelCount);
-		} else {
-			// First frame shown by the sequence (1-based frame index)
-			uint32 sequenceStart = READ_LE_UINT32(data + 16 + 20);
-			uint32 imageLocation = READ_LE_UINT32(data + 16 + 16);
-			uint32 frame = (sequenceStart >= 1 && sequenceStart < SequenceStep::kAutoDisable)
-				? sequenceStart - 1 : 0;
-			Common::File &file = res.file();
-			file.seek(imageLocation + frame * pixelCount);
-			if (file.read(item.pixels, pixelCount) != pixelCount) {
-				warning("Could not read frame of animation %08x/%08x", e.objectId, e.resId);
-				delete[] item.pixels;
-				delete[] data;
+		if (e.type == kResImage && !item.staticPixels) {
+			byte *data = res.readBlob(e);
+			if (!data)
 				continue;
-			}
+			item.rect = Common::Rect(
+				READ_LE_INT32(data), READ_LE_INT32(data + 4),
+				READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+			item.staticPixels = new byte[item.rect.width() * item.rect.height()];
+			memcpy(item.staticPixels, data + 16, item.rect.width() * item.rect.height());
+			delete[] data;
+			continue;
 		}
-		_items.push_back(item);
-		delete[] data;
-		return; // one visible resource per object is enough for now
+
+		if (e.type == kResAnimationAuto || e.type == kResAnimationAutoMobile) {
+			Animation anim;
+			if (loadAnimation(e, anim))
+				item.anims.push_back(anim);
+		}
 	}
+
+	if (!item.staticPixels && item.anims.empty())
+		return;
+
+	// Without a static image the first animation provides the idle look
+	if (!item.staticPixels)
+		item.activeAnim = 0;
+
+	debugC(2, kDebugResources, "Item %08x '%s': static=%d anims=%u",
+		item.objectId, item.name.c_str(), item.staticPixels != nullptr, item.anims.size());
+	_items.push_back(item);
+}
+
+bool World::loadAnimation(const ResourceEntry &e, Animation &anim) {
+	ResourceFile &res = g_engine->resources();
+	byte *data = res.readBlob(e);
+	if (!data)
+		return false;
+
+	anim.resId = e.resId;
+	anim.rect = Common::Rect(
+		READ_LE_INT32(data), READ_LE_INT32(data + 4),
+		READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+	anim.frameSize = anim.rect.width() * anim.rect.height();
+	anim.params.imageCount = READ_LE_UINT32(data + 16);
+	anim.params.sequenceCount = READ_LE_UINT32(data + 20);
+	anim.params.framePeriod = READ_LE_UINT32(data + 24);
+	anim.params.startPause = READ_LE_UINT32(data + 28);
+	anim.params.imageLocation = READ_LE_UINT32(data + 32);
+
+	if (!anim.params.imageCount || !anim.params.sequenceCount) {
+		delete[] data;
+		return false;
+	}
+
+	anim.sequence.resize(anim.params.sequenceCount);
+	for (uint32 s = 0; s < anim.params.sequenceCount; s++) {
+		const byte *p = data + 36 + s * 12;
+		anim.sequence[s].imageIndex = READ_LE_UINT32(p);
+		anim.sequence[s].soundCode = READ_LE_UINT32(p + 4);
+		anim.sequence[s].textCode = READ_LE_UINT32(p + 8);
+	}
+
+	// Mobile animations append a per-step displacement after the
+	// inline frame data
+	if (e.type == kResAnimationAutoMobile || e.type == kResAnimationEventMobile) {
+		uint32 deltaOffset = 36 + anim.params.sequenceCount * 12 +
+			anim.params.imageCount * anim.frameSize;
+		if (deltaOffset + 4 <= e.size) {
+			anim.stepDeltaX = READ_LE_INT16(data + deltaOffset);
+			anim.stepDeltaY = READ_LE_INT16(data + deltaOffset + 2);
+		}
+	}
+	delete[] data;
+
+	anim.frames = new byte[anim.frameSize * anim.params.imageCount];
+	Common::File &file = res.file();
+	file.seek(anim.params.imageLocation);
+	if (file.read(anim.frames, anim.frameSize * anim.params.imageCount) !=
+			anim.frameSize * anim.params.imageCount) {
+		warning("Could not read frames of animation %08x/%08x", e.objectId, e.resId);
+		delete[] anim.frames;
+		anim.frames = nullptr;
+		return false;
+	}
+	return true;
 }
 
 bool World::gotoPhase(uint32 phaseId) {
@@ -215,6 +275,109 @@ bool World::gotoPhase(uint32 phaseId) {
 	return true;
 }
 
+void World::updateItem(DrawItem &item, uint32 millis) {
+	// Start whichever animation reaches its fire time; a firing
+	// animation becomes the active resource of the object
+	for (uint a = 0; a < item.anims.size(); a++) {
+		Animation &anim = item.anims[a];
+		if (anim.running)
+			continue;
+		if (!anim.fireTime) {
+			anim.fireTime = millis + anim.params.startPause + anim.params.framePeriod;
+			continue;
+		}
+		if (millis >= anim.fireTime) {
+			anim.running = true;
+			anim.seqPos = 0;
+			anim.stepTime = millis + anim.params.framePeriod;
+			item.activeAnim = (int)a;
+			item.curDeltaX = item.curDeltaY = 0;
+			debugC(2, kDebugEvents, "Animation %08x/%08x starts",
+				item.objectId, anim.resId);
+		}
+	}
+
+	if (item.activeAnim < 0)
+		return;
+	Animation &anim = item.anims[item.activeAnim];
+	if (!anim.running)
+		return;
+
+	while (millis >= anim.stepTime && anim.running) {
+		anim.stepTime += anim.params.framePeriod ? anim.params.framePeriod : 100;
+		anim.seqPos++;
+
+		uint32 imageIndex = (anim.seqPos < anim.sequence.size())
+			? anim.sequence[anim.seqPos].imageIndex : SequenceStep::kAutoDisable;
+
+		if (imageIndex == SequenceStep::kGotoBegin) {
+			anim.seqPos = 0;
+			imageIndex = anim.sequence[0].imageIndex;
+		} else if (imageIndex == SequenceStep::kAutoDestroy ||
+				imageIndex == SequenceStep::kAutoDisable) {
+			// Sequence over: rearm the clock and show the idle look
+			anim.running = false;
+			anim.seqPos = 0;
+			anim.fireTime = millis + anim.params.startPause + anim.params.framePeriod;
+			if (item.staticPixels) {
+				item.activeAnim = -1;
+				item.curDeltaX = item.curDeltaY = 0;
+			}
+			debugC(2, kDebugEvents, "Animation %08x/%08x ends",
+				item.objectId, anim.resId);
+			break;
+		}
+
+		item.curDeltaX = (int16)(anim.seqPos * anim.stepDeltaX);
+		item.curDeltaY = (int16)(anim.seqPos * anim.stepDeltaY);
+		debugC(3, kDebugEvents, "Animation %08x/%08x step %u frame %u",
+			item.objectId, anim.resId, anim.seqPos, imageIndex);
+
+		if (anim.seqPos < anim.sequence.size() && anim.sequence[anim.seqPos].soundCode)
+			debugC(2, kDebugSound, "Animation %08x/%08x wants sound %x",
+				item.objectId, anim.resId, anim.sequence[anim.seqPos].soundCode);
+	}
+}
+
+void World::update(uint32 millis) {
+	for (uint i = 0; i < _items.size(); i++) {
+		if (!_items[i].anims.empty() && _items[i].visible)
+			updateItem(_items[i], millis);
+	}
+}
+
+bool World::hitTest(const Common::Point &pos, HitResult &result) const {
+	// Front-most first: items were stored back to front
+	for (int i = (int)_items.size() - 1; i >= 0; i--) {
+		const DrawItem &item = _items[i];
+		Common::Rect r = item.currentRect();
+		if (!item.visible || !r.contains(pos))
+			continue;
+		byte pixel = item.currentPixels()[(pos.y - r.top) * r.width() + (pos.x - r.left)];
+		if (pixel == kTransparentColor)
+			continue;
+		// Nameless items (backgrounds and scenery) don't take hits
+		if (item.name.empty())
+			continue;
+		result.objectId = item.objectId;
+		result.name = item.name;
+		result.type = (item.activeAnim >= 0) ? kResAnimationAuto : kResImage;
+		result.exitPhase = 0;
+		return true;
+	}
+
+	for (uint i = 0; i < _hotspots.size(); i++) {
+		if (!_hotspots[i].rect.contains(pos))
+			continue;
+		result.objectId = _hotspots[i].objectId;
+		result.name = _hotspots[i].name;
+		result.type = _hotspots[i].type;
+		result.exitPhase = _hotspots[i].exitPhase;
+		return true;
+	}
+	return false;
+}
+
 // Blits an 8bpp image at absolute phase coordinates onto the screen,
 // honoring the scroll origin, clipping and the transparent color
 static void blitItem(Graphics::Screen *screen, const byte *pixels,
@@ -239,8 +402,10 @@ static void blitItem(Graphics::Screen *screen, const byte *pixels,
 
 void World::draw(Graphics::Screen *screen) {
 	screen->clear(kTransparentColor);
-	for (uint i = 0; i < _items.size(); i++)
-		blitItem(screen, _items[i].pixels, _items[i].rect, _origin);
+	for (uint i = 0; i < _items.size(); i++) {
+		if (_items[i].visible)
+			blitItem(screen, _items[i].currentPixels(), _items[i].currentRect(), _origin);
+	}
 
 	if (_showWalkMap)
 		drawWalkMapOverlay(screen);
@@ -254,7 +419,7 @@ void World::drawWalkMapOverlay(Graphics::Screen *screen) const {
 		return;
 
 	// Rows are bands ending at baseY; columns are kWalkCellWidth wide.
-	// Walkable cells get a dotted fill, blocked ones stay clear.
+	// Walkable cells get a dotted fill.
 	uint16 bandTop = 0;
 	for (uint32 y = 0; y < _mapHeight; y++) {
 		uint16 bandBottom = _mapBaseY[y];

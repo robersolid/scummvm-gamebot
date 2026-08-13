@@ -72,6 +72,20 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("screenshot", WRAP_METHOD(Console, cmdScreenshot));
 	registerCmd("showwalkmap", WRAP_METHOD(Console, cmdOverlay));
 	registerCmd("showhotspots", WRAP_METHOD(Console, cmdOverlay));
+	registerCmd("wait", WRAP_METHOD(Console, cmdWait));
+}
+
+// Advances world time for scripted validation runs (gamebot_exec)
+bool Console::cmdWait(int argc, const char **argv) {
+	uint32 duration = (argc > 1) ? strtoul(argv[1], nullptr, 0) : 1000;
+	uint32 end = g_system->getMillis() + duration;
+	while (g_system->getMillis() < end && !g_engine->shouldQuit()) {
+		g_engine->world().update(g_system->getMillis());
+		g_engine->world().draw(g_engine->_screen);
+		g_engine->_screen->update();
+		g_system->delayMillis(10);
+	}
+	return true;
 }
 
 bool Console::cmdOverlay(int argc, const char **argv) {

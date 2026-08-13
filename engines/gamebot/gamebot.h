@@ -61,6 +61,21 @@ private:
 	// is missing or corrupt.
 	bool loadDataFiles();
 
+	// Mouse cursors (aMouseImage resources of the MouseSys object)
+	struct Cursor {
+		byte *pixels = nullptr;
+		uint16 width = 0, height = 0;
+		uint16 hotX = 0, hotY = 0;
+	};
+	Cursor _standardCursor, _hotCursor;
+	bool _hotCursorShown = false;
+	uint32 _hoverObjectId = 0;
+
+	void loadCursor(uint32 resId, Cursor &cursor);
+	void setCursor(const Cursor &cursor);
+	void handleMouseMove(const Common::Point &screenPos);
+	void handleMouseClick(const Common::Point &screenPos);
+
 protected:
 	// Engine APIs
 	Common::Error run() override;
