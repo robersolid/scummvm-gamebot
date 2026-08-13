@@ -82,6 +82,35 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("say", WRAP_METHOD(Console, cmdSay));
 	registerCmd("dialog", WRAP_METHOD(Console, cmdDialog));
 	registerCmd("pick", WRAP_METHOD(Console, cmdPick));
+	registerCmd("click", WRAP_METHOD(Console, cmdClick));
+	registerCmd("rclick", WRAP_METHOD(Console, cmdClick));
+	registerCmd("usewith", WRAP_METHOD(Console, cmdUseWith));
+}
+
+// Simulates mouse input for scripted validation runs
+bool Console::cmdClick(int argc, const char **argv) {
+	if (!strcmp(argv[0], "rclick")) {
+		g_engine->verbPalette().close();
+		g_engine->inventoryUI().toggle();
+		return true;
+	}
+	if (argc < 3) {
+		debugPrintf("Usage: click <x> <y> (screen coordinates)\n");
+		return true;
+	}
+	Common::Point pos((int16)atoi(argv[1]), (int16)atoi(argv[2]));
+	g_engine->handleMouseMove(pos);
+	g_engine->handleMouseClick(pos);
+	return true;
+}
+
+bool Console::cmdUseWith(int argc, const char **argv) {
+	if (argc < 3) {
+		debugPrintf("Usage: usewith <targetObjectId> <inventoryObjectId>\n");
+		return true;
+	}
+	g_engine->logic().interactWith(parseId(argv[1]), kVerbUse, parseId(argv[2]));
+	return true;
 }
 
 bool Console::cmdDialog(int argc, const char **argv) {
@@ -208,6 +237,8 @@ bool Console::cmdWait(int argc, const char **argv) {
 		g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
 		g_engine->logic().writer().draw(g_engine->_screen);
 		g_engine->logic().drawDialog(g_engine->_screen);
+		g_engine->verbPalette().draw(g_engine->_screen);
+		g_engine->inventoryUI().draw(g_engine->_screen);
 		g_engine->_screen->update();
 		g_system->delayMillis(10);
 	}
@@ -634,6 +665,8 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
 	g_engine->logic().writer().draw(g_engine->_screen);
 	g_engine->logic().drawDialog(g_engine->_screen);
+	g_engine->verbPalette().draw(g_engine->_screen);
+	g_engine->inventoryUI().draw(g_engine->_screen);
 	byte palette[256 * 3];
 	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
 

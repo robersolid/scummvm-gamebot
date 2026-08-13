@@ -33,6 +33,7 @@
 #include "gamebot/detection.h"
 #include "gamebot/logic.h"
 #include "gamebot/resource.h"
+#include "gamebot/ui.h"
 #include "gamebot/world.h"
 
 namespace Gamebot {
@@ -61,6 +62,9 @@ private:
 	World _world;               // runtime world (current phase)
 	Character _mortadelo;       // the player character (master)
 	Logic _logic;               // action rules, inventory, phrases
+	VerbPalette _verbPalette;   // pop-up verb selection
+	InventoryUI _inventoryUI;   // the safe with the collected objects
+	uint32 _linkedObject = 0;   // inventory object selected for use-with
 
 	// Loads the data file indexes. Returns false if a mandatory file
 	// is missing or corrupt.
@@ -78,6 +82,8 @@ private:
 
 	void loadCursor(uint32 resId, Cursor &cursor);
 	void setCursor(const Cursor &cursor);
+
+public:
 	void handleMouseMove(const Common::Point &screenPos);
 	void handleMouseClick(const Common::Point &screenPos);
 
@@ -101,6 +107,8 @@ public:
 	World &world() { return _world; }
 	Character &mortadelo() { return _mortadelo; }
 	Logic &logic() { return _logic; }
+	VerbPalette &verbPalette() { return _verbPalette; }
+	InventoryUI &inventoryUI() { return _inventoryUI; }
 
 	// Loads a phase and places the characters at its entry positions
 	bool gotoPhase(uint32 phaseId);

@@ -8,6 +8,7 @@ MODULE_OBJS = \
 	logic.o \
 	metaengine.o \
 	resource.o \
+	ui.o \
 	world.o
 
 # This module can be built as a plugin

@@ -81,6 +81,15 @@ void GamebotEngine::setCursor(const Cursor &cursor) {
 }
 
 void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
+	if (_inventoryUI.isOpen()) {
+		_inventoryUI.updateHover(screenPos);
+		return;
+	}
+	if (_verbPalette.isOpen()) {
+		_verbPalette.updateHover(screenPos);
+		return;
+	}
+
 	Common::Point phasePos(screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
 	HitResult hit;
 	bool hovering = _world.hitTest(phasePos, hit);
@@ -100,11 +109,32 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_logic.handleDialogClick(screenPos))
 		return;
 
+	// The inventory: picking an item selects it for a use-with
+	if (_inventoryUI.isOpen()) {
+		uint32 item = _inventoryUI.handleClick(screenPos);
+		if (item) {
+			_linkedObject = item;
+			_inventoryUI.close();
+			debugC(kDebugEvents, "Item %08x selected for use", item);
+		}
+		return;
+	}
+
+	// An open verb palette resolves the click into a verb
+	if (_verbPalette.isOpen()) {
+		Verb verb;
+		uint32 target = _verbPalette.targetObject();
+		if (_verbPalette.handleClick(screenPos, verb))
+			_logic.interactWith(target, verb);
+		return;
+	}
+
 	Common::Point phasePos(screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
 	HitResult hit;
 	if (!_world.hitTest(phasePos, hit)) {
 		// Clicking the floor walks there
 		debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
+		_linkedObject = 0;
 		_mortadelo.walkTo(_world, phasePos);
 		return;
 	}
@@ -118,11 +148,15 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 		return;
 	}
 
-	// TODO: the original shows a verb palette here; until that UI
-	// exists, takeable objects get the take verb and the rest use
-	const ObjectEntry *object = _initialWorld.findObject(hit.objectId);
-	Verb verb = (object && (object->flags & ObjectEntry::kFlagTakeable)) ? kVerbTake : kVerbUse;
-	_logic.interactWith(hit.objectId, verb);
+	if (_linkedObject) {
+		// Use the selected inventory object on the clicked one
+		uint32 item = _linkedObject;
+		_linkedObject = 0;
+		_logic.interactWith(hit.objectId, kVerbUse, item);
+		return;
+	}
+
+	_verbPalette.open(screenPos, hit.objectId);
 }
 
 bool GamebotEngine::gotoPhase(uint32 phaseId) {
@@ -212,6 +246,13 @@ Common::Error GamebotEngine::run() {
 			case Common::EVENT_LBUTTONDOWN:
 				handleMouseClick(e.mouse);
 				break;
+			case Common::EVENT_RBUTTONDOWN:
+				// Right click toggles the inventory safe
+				if (!_logic.isDialogOpen()) {
+					_verbPalette.close();
+					_inventoryUI.toggle();
+				}
+				break;
 			case Common::EVENT_KEYDOWN:
 				// Debug scrolling of wide phases until the camera
 				// follows the characters
@@ -246,6 +287,8 @@ Common::Error GamebotEngine::run() {
 		_world.draw(_screen, &_mortadelo);
 		_logic.writer().draw(_screen);
 		_logic.drawDialog(_screen);
+		_verbPalette.draw(_screen);
+		_inventoryUI.draw(_screen);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();

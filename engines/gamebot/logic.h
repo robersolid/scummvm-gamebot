@@ -117,8 +117,9 @@ private:
 // enabled state
 class Logic {
 public:
-	// Walks the character to an object and performs a verb on arrival
-	void interactWith(uint32 objectId, Verb verb);
+	// Walks the character to an object and performs a verb on arrival;
+	// linkedObjectId carries the inventory object of a use-with
+	void interactWith(uint32 objectId, Verb verb, uint32 linkedObjectId = 0);
 	// Immediately dispatches a verb event to an object's rule table
 	void performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId = 0);
 	void update(uint32 millis);
@@ -176,6 +177,7 @@ private:
 
 	// Pending walk-then-act interaction
 	uint32 _pendingObject = 0;
+	uint32 _pendingLinked = 0;
 	Verb _pendingVerb = kVerbUse;
 	bool _pendingActive = false;
 };

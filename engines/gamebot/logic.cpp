@@ -111,12 +111,13 @@ static uint32 verbEvent(Verb verb) {
 	}
 }
 
-void Logic::interactWith(uint32 objectId, Verb verb) {
+void Logic::interactWith(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 	const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
 	if (!object)
 		return;
 
 	_pendingObject = objectId;
+	_pendingLinked = linkedObjectId;
 	_pendingVerb = verb;
 	_pendingActive = true;
 
@@ -131,6 +132,17 @@ void Logic::interactWith(uint32 objectId, Verb verb) {
 void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 	uint32 eventId = verbEvent(verb);
 	uint matched = dispatchEvent(eventId, objectId, linkedObjectId);
+
+	// Taking an object marked as takeable is built into the original
+	// engine; the rule tables only cover the special cases
+	if (verb == kVerbTake) {
+		const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
+		if (object && (object->flags & ObjectEntry::kFlagTakeable)) {
+			addToInventory(objectId);
+			return;
+		}
+	}
+
 	if (!matched) {
 		// No rule handled the verb: the original answers with a
 		// generic "I can't do that" phrase chosen by the TCAU flags
@@ -226,7 +238,7 @@ void Logic::update(uint32 millis) {
 	// Fire the pending verb when the character arrives
 	if (_pendingActive && !g_engine->mortadelo().isWalking()) {
 		_pendingActive = false;
-		performVerb(_pendingObject, _pendingVerb);
+		performVerb(_pendingObject, _pendingVerb, _pendingLinked);
 	}
 }
 
@@ -245,7 +257,9 @@ uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
 		const ActionRule &rule = actions.rule(i);
 		if (rule.eventId != eventId || rule.eventParam1 != param1)
 			continue;
-		if (rule.eventParam2 && param2 && rule.eventParam2 != param2)
+		// A rule that names a second parameter (e.g. the inventory
+		// object of a use-with) only fires on an exact match
+		if (rule.eventParam2 && rule.eventParam2 != param2)
 			continue;
 		if (!checkConditions(rule))
 			continue;
