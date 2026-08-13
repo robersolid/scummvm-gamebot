@@ -169,6 +169,16 @@ public:
 	uint32 objectIdAt(uint index) const { return _objects[index].objectId; }
 	const ActionRule &rule(uint index) const { return _rules[index]; }
 
+	// Object owning a rule (conditions with a zero argument default
+	// to the rule's own object in the original engine)
+	uint32 ruleOwner(uint ruleIndex) const {
+		for (uint i = 0; i < _objects.size(); i++) {
+			if (ruleIndex >= _objects[i].firstEntry && ruleIndex <= _objects[i].lastEntry)
+				return _objects[i].objectId;
+		}
+		return 0;
+	}
+
 private:
 	struct ObjectActions {
 		uint32 objectId = 0;

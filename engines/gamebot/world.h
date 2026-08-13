@@ -68,6 +68,14 @@ public:
 	void applyPalette() const;
 	uint32 musicCode() const { return _musicCode; }
 
+	// Weather control (0 = off, 1 = snow, 2 = rain), driven by the
+	// fx-start message of the game script
+	void setWeather(uint32 fxCode) {
+		_fxCode = fxCode;
+		initWeather();
+	}
+	uint32 weather() const { return _fxCode; }
+
 	// Walk map access for the characters
 	bool hasWalkMap() const { return _mapWidth != 0; }
 	uint mapWidth() const { return _mapWidth; }

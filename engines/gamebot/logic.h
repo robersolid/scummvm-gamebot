@@ -51,7 +51,11 @@ enum EventCode {
 	kEventObjOpenNow = 0x0E400000,
 	kEventObjUseNow = 0x0E800000,
 	kEventOptionsActivate = 0x08000001,
-	kEventAppPhaseChange = 0x0D000002
+	kEventTextClean = 0x0A000020,
+	kEventFXStartEffect = 0x0C000001,
+	kEventAppPhaseChange = 0x0D000002,
+	kEventPersSetMaster = 0x0F000100,
+	kEventPersWalkTo = 0x0F020000
 };
 
 // Action codes (original VisualObject.h)
@@ -146,6 +150,9 @@ public:
 	// object overrides and dialog sentence states)
 	void syncGame(Common::Serializer &s);
 
+	// Starts a fresh game: state cleared, back to the chapter 1 map
+	void resetGame();
+
 	TextWriter &writer() { return _writer; }
 
 	// Shows a phrase spoken by the master character: text on screen,
@@ -158,6 +165,13 @@ public:
 	void activateDialog(uint32 dialogId);
 	void pickSentence(uint index);
 	bool isDialogOpen() const { return _dialogOpen; }
+
+	// True while a scripted sequence runs (a phrase on screen, a
+	// script-driven walk or an answer animation): player input that
+	// moves the characters is ignored meanwhile
+	bool isBusy() const {
+		return _writer.active() || _scriptedWalk != 0 || _pendingAnswerAnim != 0;
+	}
 	void drawDialog(Graphics::Screen *screen) const;
 	bool handleDialogClick(const Common::Point &screenPos);
 
@@ -169,7 +183,7 @@ private:
 	// Dispatches an event through the rule table of an object.
 	// Returns the number of rules that matched and ran.
 	uint dispatchEvent(uint32 eventId, uint32 param1, uint32 param2);
-	bool checkConditions(const ActionRule &rule);
+	bool checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam);
 	void runAction(const ActionRule &rule);
 	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3);
 	void sayGenericResponse(uint32 verbEventId, uint16 responseFlags);
@@ -199,6 +213,9 @@ private:
 	uint32 _pendingLinked = 0;
 	Verb _pendingVerb = kVerbUse;
 	bool _pendingActive = false;
+
+	// Script-driven walk: the arrival event carries the packed target
+	uint32 _scriptedWalk = 0;
 };
 
 } // End of namespace Gamebot

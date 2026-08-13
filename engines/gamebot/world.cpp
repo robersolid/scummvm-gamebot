@@ -84,9 +84,12 @@ bool World::loadPhaseInit(uint32 phaseId) {
 	applyPalette();
 
 	_musicCode = READ_LE_UINT32(data + 8);
-	_fxCode = READ_LE_UINT32(data + 12);
 	debugC(kDebugResources, "Phase %08x: %dx%d, music %x, fx %x", phaseId,
-		_phaseWidth, _phaseHeight, _musicCode, _fxCode);
+		_phaseWidth, _phaseHeight, _musicCode, READ_LE_UINT32(data + 12));
+
+	// Weather does NOT start from the phase data: the game script
+	// turns it on and off through the fx-start message
+	_fxCode = 0;
 	initWeather();
 	if (_musicCode)
 		g_engine->sounds().playMusic(_musicCode);
@@ -440,14 +443,34 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 		anim.seqPos++;
 
 		uint32 imageIndex = (anim.seqPos < anim.sequence.size())
-			? anim.sequence[anim.seqPos].imageIndex : SequenceStep::kAutoDisable;
+			? anim.sequence[anim.seqPos].imageIndex : 0;
 
 		if (imageIndex == SequenceStep::kGotoBegin) {
 			anim.seqPos = 0;
 			imageIndex = anim.sequence[0].imageIndex;
 		} else if (imageIndex == SequenceStep::kAutoDestroy ||
 				imageIndex == SequenceStep::kAutoDisable) {
-			// Sequence over: rearm the clock and show the idle look
+			// Auto-destroy/disable markers end the animation for good:
+			// the object hides (or reverts to its static image) and
+			// the animation never rearms
+			anim.running = false;
+			anim.autoFire = false;
+			anim.seqPos = 0;
+			if (item.staticPixels) {
+				item.activeAnim = -1;
+				item.curDeltaX = item.curDeltaY = 0;
+			} else if (imageIndex == SequenceStep::kAutoDestroy) {
+				item.visible = false;
+			}
+			debugC(2, kDebugEvents, "Animation %08x/%08x self-disables",
+				item.objectId, anim.resId);
+			anim.notifyEnd = false;
+			g_engine->logic().onAnimationEnded(anim.resId);
+			break;
+		} else if (imageIndex == 0) {
+			// Plain end of a non-cyclic sequence: show the idle look,
+			// rearm the clock (ambient animations replay after their
+			// pause) and let the rule tables see the end
 			anim.running = false;
 			anim.seqPos = 0;
 			anim.fireTime = millis + anim.params.startPause + anim.params.framePeriod;
@@ -457,10 +480,8 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 			}
 			debugC(2, kDebugEvents, "Animation %08x/%08x ends",
 				item.objectId, anim.resId);
-			if (anim.notifyEnd) {
-				anim.notifyEnd = false;
-				g_engine->logic().onAnimationEnded(anim.resId);
-			}
+			anim.notifyEnd = false;
+			g_engine->logic().onAnimationEnded(anim.resId);
 			break;
 		}
 

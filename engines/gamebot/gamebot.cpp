@@ -84,6 +84,12 @@ void GamebotEngine::setCursor(const Cursor &cursor) {
 }
 
 void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
+	_lastMousePhasePos = Common::Point(
+		screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
+	if (_mainMenu.isOpen()) {
+		_mainMenu.updateHover(screenPos);
+		return;
+	}
 	if (_inventoryUI.isOpen()) {
 		_inventoryUI.updateHover(screenPos);
 		return;
@@ -124,9 +130,56 @@ void GamebotEngine::linkObject(uint32 objectId) {
 	debugC(kDebugEvents, "Item %08x linked to the cursor", objectId);
 }
 
+// Runs a main menu button; the load, save and options screens use
+// the ScummVM dialogs instead of the original panels
+void GamebotEngine::runMenuAction(int action) {
+	switch (action) {
+	case MainMenu::kActionNewGame:
+		_mainMenu.close();
+		_logic.resetGame();
+		break;
+	case MainMenu::kActionLoad:
+		_mainMenu.close();
+		if (loadGameDialog())
+			break;
+		_mainMenu.open();
+		break;
+	case MainMenu::kActionSave:
+		_mainMenu.close();
+		saveGameDialog();
+		_mainMenu.open();
+		break;
+	case MainMenu::kActionCredits:
+		// The credits are a phase whose video ends by asking for the
+		// menu again through the rule tables
+		_mainMenu.close();
+		gotoPhase(0x71);
+		break;
+	case MainMenu::kActionOptions:
+		openMainMenuDialog();
+		break;
+	case MainMenu::kActionQuit:
+		quitGame();
+		break;
+	default:
+		break;
+	}
+}
+
 void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
+	// The main menu is modal above everything
+	if (_mainMenu.isOpen()) {
+		runMenuAction(_mainMenu.handleClick(screenPos));
+		return;
+	}
+
 	// An open conversation captures every click
 	if (_logic.handleDialogClick(screenPos))
+		return;
+
+	// Scripted sequences ignore every player input, as the original
+	// does by disabling the mouse around them
+	if (_logic.isBusy())
 		return;
 
 	// The inventory: picking an item hangs it from the cursor; the
@@ -263,6 +316,18 @@ void GamebotEngine::switchMaster() {
 	debugC(kDebugEvents, "Master is now %08x", _master->objectId());
 }
 
+void GamebotEngine::setMasterById(uint32 characterId) {
+	Character *character =
+		(characterId == _mortadelo.objectId()) ? &_mortadelo :
+		(characterId == _filemon.objectId()) ? &_filemon :
+		(characterId == _both.objectId()) ? &_both : nullptr;
+	if (!character || !character->isLoaded())
+		return;
+	_master->setTalking(false);
+	_master = character;
+	debugC(kDebugEvents, "Master is now %08x", characterId);
+}
+
 bool GamebotEngine::gotoPhase(uint32 phaseId) {
 	if (!_world.gotoPhase(phaseId))
 		return false;
@@ -392,7 +457,7 @@ Common::Error GamebotEngine::run() {
 				break;
 			case Common::EVENT_RBUTTONDOWN:
 				// Right click toggles the inventory safe
-				if (!_logic.isDialogOpen()) {
+				if (!_logic.isDialogOpen() && !_logic.isBusy() && !_mainMenu.isOpen()) {
 					_verbPalette.close();
 					_inventoryUI.toggle();
 				}
@@ -405,8 +470,14 @@ Common::Error GamebotEngine::run() {
 						MAX(0, _world.phaseWidth() - kScreenWidth));
 				else if (e.kbd.keycode == Common::KEYCODE_LEFT)
 					_world.origin().x = MAX<int16>(_world.origin().x - 16, 0);
-				else if (e.kbd.keycode == Common::KEYCODE_TAB)
+				else if (e.kbd.keycode == Common::KEYCODE_TAB && !_logic.isBusy())
 					switchMaster();
+				else if (e.kbd.keycode == Common::KEYCODE_ESCAPE) {
+					if (_mainMenu.isOpen())
+						_mainMenu.close();
+					else
+						_mainMenu.open();
+				}
 				break;
 			default:
 				break;
@@ -414,6 +485,9 @@ Common::Error GamebotEngine::run() {
 		}
 
 		uint32 millis = g_system->getMillis();
+		// The cursor vanishes while a scripted sequence runs
+		if (CursorMan.isVisible() == _logic.isBusy())
+			CursorMan.showMouse(!_logic.isBusy());
 		_world.update(millis);
 		_mortadelo.tick(millis, _world);
 		_filemon.tick(millis, _world);
@@ -439,6 +513,7 @@ Common::Error GamebotEngine::run() {
 		_changerBadge.draw(_screen);
 		_verbPalette.draw(_screen);
 		_inventoryUI.draw(_screen);
+		_mainMenu.draw(_screen);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();

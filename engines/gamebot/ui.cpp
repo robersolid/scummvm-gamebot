@@ -21,6 +21,8 @@
 
 #include "common/debug.h"
 #include "common/endian.h"
+#include "common/system.h"
+#include "graphics/paletteman.h"
 #include "graphics/screen.h"
 
 #include "gamebot/character.h"
@@ -170,6 +172,115 @@ void VerbPalette::draw(Graphics::Screen *screen) const {
 			_pos.x + icon.rect.left - _background.rect.left,
 			_pos.y + icon.rect.top - _background.rect.top,
 			icon.rect.width(), icon.rect.height());
+	}
+}
+
+// Menu resources of the original OptionsMaster: the panel background
+// (object c000), one object per button with normal/hover/pressed
+// images, and the menu palette in the phase init of object 0x13
+static const uint32 kMenuBackgroundId = 0xc000;
+static const uint32 kMenuFirstButtonId = 0xc001; // Nueva..Salir are consecutive
+
+MainMenu::~MainMenu() {
+	delete[] _background.pixels;
+	for (uint i = 0; i < kActionCount; i++) {
+		delete[] _buttons[i].pixels;
+		delete[] _highlights[i].pixels;
+	}
+}
+
+bool MainMenu::loadImage(uint32 objectId, uint imageIndex, Image &image) {
+	ResourceFile &res = g_engine->resources();
+	int i = res.findObject(objectId);
+	uint seen = 0;
+	for (; i >= 0 && i < (int)res.count() && res.entry(i).objectId == objectId; i++) {
+		if (res.entry(i).type != kResImage || seen++ != imageIndex)
+			continue;
+		byte *data = res.readBlob(res.entry(i));
+		if (!data)
+			return false;
+		image.rect = Common::Rect(
+			READ_LE_INT32(data), READ_LE_INT32(data + 4),
+			READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+		image.pixels = new byte[image.rect.width() * image.rect.height()];
+		memcpy(image.pixels, data + 16, image.rect.width() * image.rect.height());
+		delete[] data;
+		return true;
+	}
+	return false;
+}
+
+bool MainMenu::load() {
+	if (!loadImage(kMenuBackgroundId, 0, _background))
+		return false;
+	for (uint i = 0; i < kActionCount; i++) {
+		loadImage(kMenuFirstButtonId + i, 0, _buttons[i]);
+		loadImage(kMenuFirstButtonId + i, 1, _highlights[i]);
+	}
+
+	// The menu palette lives in the OptionsMaster phase init
+	const ResourceEntry *e = g_engine->resources().findResource(0x13, kResPhaseInit);
+	byte *data = e ? g_engine->resources().readBlob(*e) : nullptr;
+	if (data) {
+		for (uint i = 0; i < 256; i++) {
+			_palette[i * 3] = data[16 + i * 4];
+			_palette[i * 3 + 1] = data[16 + i * 4 + 1];
+			_palette[i * 3 + 2] = data[16 + i * 4 + 2];
+		}
+		delete[] data;
+	}
+	_loaded = true;
+	return true;
+}
+
+void MainMenu::open() {
+	if (!_loaded && !load())
+		return;
+	g_system->getPaletteManager()->setPalette(_palette, 0, 256);
+	_hover = -1;
+	_open = true;
+}
+
+void MainMenu::close() {
+	_open = false;
+	g_engine->world().applyPalette();
+}
+
+int MainMenu::hitButton(const Common::Point &screenPos) const {
+	for (uint i = 0; i < kActionCount; i++) {
+		const Image &button = _buttons[i];
+		if (!button.pixels || !button.rect.contains(screenPos))
+			continue;
+		byte pixel = button.pixels[
+			(screenPos.y - button.rect.top) * button.rect.width() +
+			(screenPos.x - button.rect.left)];
+		if (pixel != kTransparentColor)
+			return (int)i;
+	}
+	return -1;
+}
+
+void MainMenu::updateHover(const Common::Point &screenPos) {
+	if (_open)
+		_hover = hitButton(screenPos);
+}
+
+MainMenu::Action MainMenu::handleClick(const Common::Point &screenPos) {
+	int button = hitButton(screenPos);
+	return (button >= 0) ? (Action)button : kActionNone;
+}
+
+void MainMenu::draw(Graphics::Screen *screen) const {
+	if (!_open || !_loaded)
+		return;
+	blitImage(screen, _background.pixels, _background.rect.left, _background.rect.top,
+		_background.rect.width(), _background.rect.height());
+	for (uint i = 0; i < kActionCount; i++) {
+		const Image &image = ((int)i == _hover && _highlights[i].pixels)
+			? _highlights[i] : _buttons[i];
+		if (image.pixels)
+			blitImage(screen, image.pixels, image.rect.left, image.rect.top,
+				image.rect.width(), image.rect.height());
 	}
 }
 

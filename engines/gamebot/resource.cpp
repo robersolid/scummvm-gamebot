@@ -83,8 +83,21 @@ bool ResourceFile::load(const Common::Path &name) {
 }
 
 int ResourceFile::findObject(uint32 objectId) const {
-	// The index is sorted by objectId with all entries of an object
-	// contiguous, so a plain binary search plus a rewind is enough
+	if (_entries.empty())
+		return -1;
+
+	// The index is sorted by objectId except for its very first
+	// entry; the original FindObject probes both ends explicitly
+	// before bisecting, which keeps that entry reachable
+	if (_entries[0].objectId == objectId)
+		return 0;
+	if (_entries.back().objectId == objectId) {
+		int i = (int)_entries.size() - 1;
+		while (i > 0 && _entries[i - 1].objectId == objectId)
+			i--;
+		return i;
+	}
+
 	int low = 0, high = (int)_entries.size() - 1;
 	while (low <= high) {
 		int mid = (low + high) / 2;

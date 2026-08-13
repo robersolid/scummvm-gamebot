@@ -72,6 +72,51 @@ private:
 	int _hover = -1;
 };
 
+// The original main menu (OptionsMaster): a full-screen panel with
+// its own palette and image buttons. The load, save and options
+// screens delegate to the ScummVM dialogs.
+class MainMenu {
+public:
+	enum Action {
+		kActionNone = -1,
+		kActionNewGame = 0,
+		kActionLoad,
+		kActionSave,
+		kActionCredits,
+		kActionOptions,
+		kActionQuit,
+		kActionCount
+	};
+
+	~MainMenu();
+
+	bool load();
+	void open();
+	void close();
+	bool isOpen() const { return _open; }
+
+	void updateHover(const Common::Point &screenPos);
+	Action handleClick(const Common::Point &screenPos);
+	void draw(Graphics::Screen *screen) const;
+
+private:
+	struct Image {
+		Common::Rect rect;
+		byte *pixels = nullptr;
+	};
+
+	bool loadImage(uint32 objectId, uint imageIndex, Image &image);
+	int hitButton(const Common::Point &screenPos) const;
+
+	Image _background;
+	Image _buttons[kActionCount];     // normal state
+	Image _highlights[kActionCount];  // hovered state
+	byte _palette[256 * 3] = {};
+	bool _loaded = false;
+	bool _open = false;
+	int _hover = -1;
+};
+
 // The medallion of the original ChangerMaster: a badge at the top
 // right showing the partner agent; clicking it spins the badge and
 // hands control to the other character.

@@ -323,6 +323,13 @@ void Logic::update(uint32 millis) {
 		_pendingActive = false;
 		performVerb(_pendingObject, _pendingVerb, _pendingLinked);
 	}
+
+	// Announce the end of a script-driven walk
+	if (_scriptedWalk && !g_engine->master().isWalking()) {
+		uint32 packed = _scriptedWalk;
+		_scriptedWalk = 0;
+		dispatchEvent(kEventObjArrived, packed, 0);
+	}
 }
 
 uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
@@ -344,7 +351,7 @@ uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
 		// object of a use-with) only fires on an exact match
 		if (rule.eventParam2 && rule.eventParam2 != param2)
 			continue;
-		if (!checkConditions(rule))
+		if (!checkConditions(rule, actions.ruleOwner(i), param2))
 			continue;
 		debugC(kDebugActions, "Rule: on %s(%x,%x) do %s(%x,%x,%x)",
 			eventName(eventId) ? eventName(eventId) : "?", param1, param2,
@@ -357,15 +364,16 @@ uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
 	return matched;
 }
 
-bool Logic::checkConditions(const ActionRule &rule) {
-	// All conditions must hold. TODO: OR terms (0x200) are treated as
-	// AND for now; no rule chain observed so far depends on them.
+bool Logic::checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam) {
+	// All conditions must hold; the OR flag exists in the original
+	// headers but its dispatcher never evaluates it, so plain AND is
+	// the faithful behavior. A zero argument means the rule's owner.
 	for (uint c = 0; c < 6; c++) {
 		uint16 condition = rule.conditions[c];
 		if (!condition)
 			continue;
 		bool result = true;
-		uint32 arg = rule.condArgs[c];
+		uint32 arg = rule.condArgs[c] ? rule.condArgs[c] : owner;
 		switch (condition & 0xff) {
 		case kIfEnabled:
 			result = g_engine->world().isEnabled(arg);
@@ -373,11 +381,15 @@ bool Logic::checkConditions(const ActionRule &rule) {
 		case kIfInInventory:
 			result = isInInventory(arg);
 			break;
-		case kIfInBounds:
-			result = true; // TODO: mouse-in-rect check
+		case kIfInBounds: {
+			// The pointer must rest inside the object's bounds
+			HitResult hit;
+			result = g_engine->world().hitTest(g_engine->lastMousePhasePos(), hit) &&
+				hit.objectId == arg;
 			break;
+		}
 		case kIfLParam:
-			result = true; // TODO: linked-object parameter check
+			result = (rule.condArgs[c] == lParam);
 			break;
 		default:
 			break;
@@ -388,6 +400,20 @@ bool Logic::checkConditions(const ActionRule &rule) {
 			return false;
 	}
 	return true;
+}
+
+void Logic::resetGame() {
+	_inventory.clear();
+	_objectEnabled.clear();
+	_dialogs.clear();
+	_writer.update(UINT32_MAX); // clears any phrase
+	_phraseSound = 0;
+	_pendingActive = false;
+	_scriptedWalk = 0;
+	endDialog();
+	// A new game runs the chapter 1 chain: an animation phase, the
+	// chapter video and then the street with its scripted intro
+	g_engine->gotoPhase(0x2001);
 }
 
 void Logic::runAction(const ActionRule &rule) {
@@ -448,17 +474,41 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 		activateDialog(param2);
 		break;
 	case kEventAppPhaseChange:
-		// The intro chain jumps to 0x99, the original main menu;
-		// until that UI exists a new game starts at the chapter 1 map
+		// The intro chain jumps to 0x99, which is the main menu
 		if (!g_engine->gotoPhase(param2)) {
-			debugC(kDebugActions, "Phase %08x is not a room (menu?), starting chapter 1", param2);
-			g_engine->gotoPhase(0x101);
+			debugC(kDebugActions, "Phase %08x is the menu panel", param2);
+			g_engine->mainMenu().open();
 		}
 		return; // gotoPhase already ran any follow-up chain
 	case kEventOptionsActivate:
-		debugC(kDebugActions, "Options menu requested (TODO), starting chapter 1");
-		g_engine->gotoPhase(0x101);
+		g_engine->mainMenu().open();
 		return;
+	case kEventPersSetMaster:
+		// The scripted conversations switch the speaking character
+		g_engine->setMasterById(param2);
+		break;
+	case kEventPersWalkTo: {
+		// Script-driven walk to a packed (y << 16 | x) point; the
+		// arrival is announced with the same packed parameter
+		Common::Point target((int16)(param2 & 0xffff), (int16)(param2 >> 16));
+		debugC(kDebugActions, "Scripted walk to (%d,%d) orient %u", target.x, target.y, param3);
+		if (g_engine->master().walkTo(g_engine->world(), target))
+			_scriptedWalk = param2;
+		else
+			dispatchEvent(kEventObjArrived, param2, 0);
+		break;
+	}
+	case kEventTextClean:
+		// The soft clean does not erase spoken phrases (they display
+		// in the sticky mode of the original writer); only the full
+		// clean (0x0A000040) wipes unconditionally
+		break;
+	case 0x0A000040: // evTextFullClean
+		_writer.update(UINT32_MAX);
+		break;
+	case kEventFXStartEffect:
+		g_engine->world().setWeather(param2);
+		break;
 	case 0x09000002: // evDialogSetFrase: toggle a sentence by text id
 		for (auto &dialog : _dialogs) {
 			for (uint i = 0; i < dialog._value.size(); i++) {

@@ -70,7 +70,9 @@ private:
 	VerbPalette _verbPalette;   // pop-up verb selection
 	InventoryUI _inventoryUI;   // the safe with the collected objects
 	ChangerBadge _changerBadge; // the character-switch medallion
+	MainMenu _mainMenu;         // the original main menu panel
 	SoundManager _sounds;       // ADPCM voices, effects and music
+	Common::Point _lastMousePhasePos; // for the in-bounds conditions
 	uint32 _linkedObject = 0;   // inventory object selected for use-with
 
 	// Loads the data file indexes. Returns false if a mandatory file
@@ -124,11 +126,15 @@ public:
 		return nullptr;
 	}
 	void switchMaster();
+	void setMasterById(uint32 characterId);
 	Logic &logic() { return _logic; }
 	VerbPalette &verbPalette() { return _verbPalette; }
 	InventoryUI &inventoryUI() { return _inventoryUI; }
 	ChangerBadge &changerBadge() { return _changerBadge; }
+	MainMenu &mainMenu() { return _mainMenu; }
 	SoundManager &sounds() { return _sounds; }
+	const Common::Point &lastMousePhasePos() const { return _lastMousePhasePos; }
+	void runMenuAction(int action);
 	// Selects an inventory object for use-with, swapping the cursor
 	// for its image; 0 restores the standard cursor
 	void linkObject(uint32 objectId);

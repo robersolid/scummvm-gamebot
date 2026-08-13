@@ -96,6 +96,22 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("saveslot", WRAP_METHOD(Console, cmdSaveSlot));
 	registerCmd("loadslot", WRAP_METHOD(Console, cmdSaveSlot));
 	registerCmd("master", WRAP_METHOD(Console, cmdMaster));
+	registerCmd("weather", WRAP_METHOD(Console, cmdWeather));
+	registerCmd("exitgame", WRAP_METHOD(Console, cmdExitGame));
+}
+
+// Ends the process cleanly so scripted validation runs need no
+// external timeout
+bool Console::cmdExitGame(int argc, const char **argv) {
+	g_engine->quitGame();
+	return true;
+}
+
+bool Console::cmdWeather(int argc, const char **argv) {
+	if (argc > 1)
+		g_engine->world().setWeather(strtoul(argv[1], nullptr, 0));
+	debugPrintf("Weather = %u (0 off, 1 snow, 2 rain)\n", g_engine->world().weather());
+	return true;
 }
 
 bool Console::cmdMaster(int argc, const char **argv) {
@@ -392,6 +408,7 @@ bool Console::cmdWait(int argc, const char **argv) {
 		g_engine->changerBadge().draw(g_engine->_screen);
 		g_engine->verbPalette().draw(g_engine->_screen);
 		g_engine->inventoryUI().draw(g_engine->_screen);
+		g_engine->mainMenu().draw(g_engine->_screen);
 		g_engine->_screen->update();
 		g_system->delayMillis(10);
 	}
@@ -821,6 +838,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	g_engine->changerBadge().draw(g_engine->_screen);
 	g_engine->verbPalette().draw(g_engine->_screen);
 	g_engine->inventoryUI().draw(g_engine->_screen);
+	g_engine->mainMenu().draw(g_engine->_screen);
 	byte palette[256 * 3];
 	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
 
