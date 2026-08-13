@@ -77,6 +77,57 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("walk", WRAP_METHOD(Console, cmdWalk));
 	registerCmd("tp", WRAP_METHOD(Console, cmdTeleport));
 	registerCmd("charinfo", WRAP_METHOD(Console, cmdCharInfo));
+	registerCmd("verb", WRAP_METHOD(Console, cmdVerb));
+	registerCmd("inv", WRAP_METHOD(Console, cmdInventory));
+	registerCmd("say", WRAP_METHOD(Console, cmdSay));
+}
+
+bool Console::cmdVerb(int argc, const char **argv) {
+	if (argc < 3) {
+		debugPrintf("Usage: verb <usar|coger|hablar|mirar|abrir|largarse> <objectId> [walk]\n");
+		debugPrintf("With 'walk' the character walks to the object first.\n");
+		return true;
+	}
+	static const struct { const char *name; Verb verb; } kVerbs[] = {
+		{ "usar", kVerbUse }, { "coger", kVerbTake }, { "hablar", kVerbTalk },
+		{ "mirar", kVerbLook }, { "abrir", kVerbOpen }, { "largarse", kVerbLeave },
+	};
+	for (const auto &v : kVerbs) {
+		if (!strcmp(argv[1], v.name)) {
+			uint32 objectId = parseId(argv[2]);
+			if (argc > 3)
+				g_engine->logic().interactWith(objectId, v.verb);
+			else
+				g_engine->logic().performVerb(objectId, v.verb);
+			return true;
+		}
+	}
+	debugPrintf("Unknown verb '%s'\n", argv[1]);
+	return true;
+}
+
+bool Console::cmdInventory(int argc, const char **argv) {
+	if (argc > 1) {
+		g_engine->logic().addToInventory(parseId(argv[1]));
+		return true;
+	}
+	uint n = 0;
+	for (auto &entry : g_engine->logic().inventory()) {
+		const ObjectEntry *object = g_engine->initialWorld().findObject(entry._key);
+		debugPrintf("%08x %s\n", entry._key, object ? object->name.c_str() : "?");
+		n++;
+	}
+	debugPrintf("%u objects (inv <objectId> adds one)\n", n);
+	return true;
+}
+
+bool Console::cmdSay(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: say <textCode>\n");
+		return true;
+	}
+	g_engine->logic().writer().showTextCode(parseId(argv[1]));
+	return true;
 }
 
 bool Console::cmdWalk(int argc, const char **argv) {
@@ -133,7 +184,9 @@ bool Console::cmdWait(int argc, const char **argv) {
 		uint32 millis = g_system->getMillis();
 		g_engine->world().update(millis);
 		g_engine->mortadelo().tick(millis, g_engine->world());
+		g_engine->logic().update(millis);
 		g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
+		g_engine->logic().writer().draw(g_engine->_screen);
 		g_engine->_screen->update();
 		g_system->delayMillis(10);
 	}
@@ -558,6 +611,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 
 	// Render a fresh frame and save it with the current system palette
 	g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
+	g_engine->logic().writer().draw(g_engine->_screen);
 	byte palette[256 * 3];
 	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
 

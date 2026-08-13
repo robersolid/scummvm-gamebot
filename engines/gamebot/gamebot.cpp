@@ -108,8 +108,17 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	debugC(kDebugEvents, "Click on %08x '%s' (%s)", hit.objectId, hit.name.c_str(),
 		resourceTypeName(hit.type));
 
-	if (hit.exitPhase && gotoPhase(hit.exitPhase))
-		debugC(kDebugEvents, "Exit taken to phase %08x", hit.exitPhase);
+	if (hit.exitPhase) {
+		if (gotoPhase(hit.exitPhase))
+			debugC(kDebugEvents, "Exit taken to phase %08x", hit.exitPhase);
+		return;
+	}
+
+	// TODO: the original shows a verb palette here; until that UI
+	// exists, takeable objects get the take verb and the rest use
+	const ObjectEntry *object = _initialWorld.findObject(hit.objectId);
+	Verb verb = (object && (object->flags & ObjectEntry::kFlagTakeable)) ? kVerbTake : kVerbUse;
+	_logic.interactWith(hit.objectId, verb);
 }
 
 bool GamebotEngine::gotoPhase(uint32 phaseId) {
@@ -210,6 +219,7 @@ Common::Error GamebotEngine::run() {
 		uint32 millis = g_system->getMillis();
 		_world.update(millis);
 		_mortadelo.tick(millis, _world);
+		_logic.update(millis);
 
 		// Camera follows the master character on wide phases,
 		// at most 5 pixels per frame (original Character::Redraw)
@@ -224,6 +234,7 @@ Common::Error GamebotEngine::run() {
 		}
 
 		_world.draw(_screen, &_mortadelo);
+		_logic.writer().draw(_screen);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();

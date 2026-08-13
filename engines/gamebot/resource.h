@@ -132,6 +132,9 @@ public:
 	// First entry of the given object with the given type, or nullptr
 	const ResourceEntry *findResource(uint32 objectId, ResourceType type) const;
 
+	// Entry with the given resource id, or nullptr (linear search)
+	const ResourceEntry *findByResId(uint32 resId) const;
+
 	// Reads the whole blob of an entry; caller owns the buffer
 	byte *readBlob(const ResourceEntry &e);
 
@@ -235,6 +238,7 @@ public:
 	const ObjectEntry &object(uint index) const { return _objects[index]; }
 
 	int findPhase(uint32 phaseId) const;
+	const ObjectEntry *findObject(uint32 objectId) const;
 
 private:
 	Common::Array<PhaseEntry> _phases;

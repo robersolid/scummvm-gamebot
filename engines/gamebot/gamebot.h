@@ -31,6 +31,7 @@
 
 #include "gamebot/character.h"
 #include "gamebot/detection.h"
+#include "gamebot/logic.h"
 #include "gamebot/resource.h"
 #include "gamebot/world.h"
 
@@ -58,6 +59,7 @@ private:
 	WorldFile _initialWorld;    // default.def: world state for a new game
 	World _world;               // runtime world (current phase)
 	Character _mortadelo;       // the player character (master)
+	Logic _logic;               // action rules, inventory, phrases
 
 	// Loads the data file indexes. Returns false if a mandatory file
 	// is missing or corrupt.
@@ -96,6 +98,7 @@ public:
 	WorldFile &initialWorld() { return _initialWorld; }
 	World &world() { return _world; }
 	Character &mortadelo() { return _mortadelo; }
+	Logic &logic() { return _logic; }
 
 	// Loads a phase and places the characters at its entry positions
 	bool gotoPhase(uint32 phaseId);

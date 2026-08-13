@@ -59,6 +59,11 @@ public:
 	bool gotoPhase(uint32 phaseId);
 	void update(uint32 millis); // advances animations
 
+	// Game state changes driven by the action rules
+	bool isEnabled(uint32 objectId) const;
+	void setEnabled(uint32 objectId, bool enabled);
+	bool startAnimation(uint32 objectId, uint32 resId);
+
 	// Walk map access for the characters
 	bool hasWalkMap() const { return _mapWidth != 0; }
 	uint mapWidth() const { return _mapWidth; }
@@ -108,6 +113,8 @@ private:
 		uint32 stepTime = 0;     // when to advance while running
 		int16 stepDeltaX = 0, stepDeltaY = 0; // per-step displacement (mobile)
 		bool running = false;
+		bool autoFire = true;    // false for event animations
+		bool notifyEnd = false;  // report the end to the game logic
 	};
 
 	struct DrawItem {

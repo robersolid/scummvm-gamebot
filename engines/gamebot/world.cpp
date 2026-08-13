@@ -182,10 +182,14 @@ void World::addDrawItem(const ObjectEntry &object, uint16 layer) {
 			continue;
 		}
 
-		if (e.type == kResAnimationAuto || e.type == kResAnimationAutoMobile) {
+		bool isAuto = e.type == kResAnimationAuto || e.type == kResAnimationAutoMobile;
+		bool isEvent = e.type == kResAnimationEvent || e.type == kResAnimationEventMobile;
+		if (isAuto || isEvent) {
 			Animation anim;
-			if (loadAnimation(e, anim))
+			if (loadAnimation(e, anim)) {
+				anim.autoFire = isAuto;
 				item.anims.push_back(anim);
+			}
 		}
 	}
 
@@ -289,7 +293,7 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 	// animation becomes the active resource of the object
 	for (uint a = 0; a < item.anims.size(); a++) {
 		Animation &anim = item.anims[a];
-		if (anim.running)
+		if (anim.running || !anim.autoFire)
 			continue;
 		if (!anim.fireTime) {
 			anim.fireTime = millis + anim.params.startPause + anim.params.framePeriod;
@@ -334,6 +338,10 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 			}
 			debugC(2, kDebugEvents, "Animation %08x/%08x ends",
 				item.objectId, anim.resId);
+			if (anim.notifyEnd) {
+				anim.notifyEnd = false;
+				g_engine->logic().onAnimationEnded(anim.resId);
+			}
 			break;
 		}
 
@@ -353,6 +361,52 @@ void World::update(uint32 millis) {
 		if (!_items[i].anims.empty() && _items[i].visible)
 			updateItem(_items[i], millis);
 	}
+}
+
+bool World::isEnabled(uint32 objectId) const {
+	for (uint i = 0; i < _items.size(); i++) {
+		if (_items[i].objectId == objectId)
+			return _items[i].visible;
+	}
+	return false;
+}
+
+void World::setEnabled(uint32 objectId, bool enabled) {
+	// The original moves disabled objects to layer 0; visibility is
+	// the observable effect for both drawing and hit tests
+	for (uint i = 0; i < _items.size(); i++) {
+		if (_items[i].objectId == objectId) {
+			_items[i].visible = enabled;
+			debugC(kDebugActions, "Object %08x %s", objectId, enabled ? "enabled" : "disabled");
+			return;
+		}
+	}
+	debugC(kDebugActions, "Object %08x not in this phase (%s ignored)",
+		objectId, enabled ? "enable" : "disable");
+}
+
+bool World::startAnimation(uint32 objectId, uint32 resId) {
+	for (uint i = 0; i < _items.size(); i++) {
+		DrawItem &item = _items[i];
+		if (item.objectId != objectId)
+			continue;
+		for (uint a = 0; a < item.anims.size(); a++) {
+			if (item.anims[a].resId != resId)
+				continue;
+			Animation &anim = item.anims[a];
+			anim.running = true;
+			anim.seqPos = 0;
+			anim.stepTime = g_system->getMillis() + anim.params.framePeriod;
+			anim.notifyEnd = true;
+			item.activeAnim = (int)a;
+			item.visible = true;
+			item.curDeltaX = item.curDeltaY = 0;
+			debugC(kDebugActions, "Animation %08x/%08x started by rule", objectId, resId);
+			return true;
+		}
+	}
+	debugC(kDebugActions, "Animation %08x/%08x not available in this phase", objectId, resId);
+	return false;
 }
 
 bool World::hitTest(const Common::Point &pos, HitResult &result) const {

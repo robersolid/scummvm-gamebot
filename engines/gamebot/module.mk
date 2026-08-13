@@ -5,6 +5,7 @@ MODULE_OBJS = \
 	character.o \
 	console.o \
 	debug-names.o \
+	logic.o \
 	metaengine.o \
 	resource.o \
 	world.o

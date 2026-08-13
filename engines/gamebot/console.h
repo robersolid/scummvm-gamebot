@@ -49,6 +49,9 @@ private:
 	bool cmdWalk(int argc, const char **argv);
 	bool cmdTeleport(int argc, const char **argv);
 	bool cmdCharInfo(int argc, const char **argv);
+	bool cmdVerb(int argc, const char **argv);
+	bool cmdInventory(int argc, const char **argv);
+	bool cmdSay(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
 	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,

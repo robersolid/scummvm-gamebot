@@ -112,6 +112,14 @@ const ResourceEntry *ResourceFile::findResource(uint32 objectId, ResourceType ty
 	return nullptr;
 }
 
+const ResourceEntry *ResourceFile::findByResId(uint32 resId) const {
+	for (uint i = 0; i < _entries.size(); i++) {
+		if (_entries[i].resId == resId)
+			return &_entries[i];
+	}
+	return nullptr;
+}
+
 byte *ResourceFile::readBlob(const ResourceEntry &e) {
 	byte *data = new byte[e.size];
 	_file.seek(e.location);
@@ -240,6 +248,14 @@ int WorldFile::findPhase(uint32 phaseId) const {
 			return (int)i;
 	}
 	return -1;
+}
+
+const ObjectEntry *WorldFile::findObject(uint32 objectId) const {
+	for (uint i = 0; i < _objects.size(); i++) {
+		if (_objects[i].objectId == objectId)
+			return &_objects[i];
+	}
+	return nullptr;
 }
 
 } // End of namespace Gamebot
