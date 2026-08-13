@@ -250,6 +250,20 @@ int WorldFile::findPhase(uint32 phaseId) const {
 	return -1;
 }
 
+uint32 WorldFile::phaseContaining(uint32 objectId) const {
+	for (uint p = 0; p < _phases.size(); p++) {
+		const PhaseEntry &phase = _phases[p];
+		for (uint32 l = 0; l < phase.layerCount; l++) {
+			const LayerEntry &layer = _layers[phase.layerFirst + l];
+			for (uint32 o = 0; o < layer.objectCount; o++) {
+				if (_objects[layer.objectFirst + o].objectId == objectId)
+					return phase.phaseId;
+			}
+		}
+	}
+	return 0;
+}
+
 const ObjectEntry *WorldFile::findObject(uint32 objectId) const {
 	for (uint i = 0; i < _objects.size(); i++) {
 		if (_objects[i].objectId == objectId)

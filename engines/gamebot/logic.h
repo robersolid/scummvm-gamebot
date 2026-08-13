@@ -49,7 +49,9 @@ enum EventCode {
 	kEventObjTakeNow = 0x0E100000,
 	kEventObjLookNow = 0x0E200000,
 	kEventObjOpenNow = 0x0E400000,
-	kEventObjUseNow = 0x0E800000
+	kEventObjUseNow = 0x0E800000,
+	kEventOptionsActivate = 0x08000001,
+	kEventAppPhaseChange = 0x0D000002
 };
 
 // Action codes (original VisualObject.h)

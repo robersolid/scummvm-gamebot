@@ -251,6 +251,24 @@ bool GamebotEngine::gotoPhase(uint32 phaseId) {
 		if (_mortadelo.visible)
 			_mortadelo.enterPhase(_world, *location);
 	}
+
+	// Phases can carry full-screen videos (the logo and intro chain);
+	// they play on entry and their end events drive the phase chain.
+	// A chained phase change aborts the scan of the old phase.
+	if (phaseIndex >= 0) {
+		const PhaseEntry &phase = _initialWorld.phase(phaseIndex);
+		for (uint32 l = 1; l < phase.layerCount && _world.currentPhaseId() == phaseId; l++) {
+			const LayerEntry &layer = _initialWorld.layer(phase.layerFirst + l);
+			for (uint32 o = 0; o < layer.objectCount && _world.currentPhaseId() == phaseId; o++) {
+				const ObjectEntry &object = _initialWorld.object(layer.objectFirst + o);
+				if (object.objectId < 0x100)
+					continue;
+				const ResourceEntry *flic = _resources.findResource(object.objectId, kResAnimationFlic);
+				if (flic && playVideo(flic->resId))
+					_logic.onAnimationEnded(flic->resId);
+			}
+		}
+	}
 	return true;
 }
 
@@ -299,10 +317,13 @@ Common::Error GamebotEngine::run() {
 	if (saveSlot != -1)
 		(void)loadGameState(saveSlot);
 
-	// Show something real until the script system decides the phase:
-	// the chapter 1 map screen
-	if (!_world.currentPhaseId())
-		gotoPhase(0x101);
+	// Boot like the original: the starting phase is wherever the
+	// characters live in default.def, which chains the logo and
+	// intro videos into the game
+	if (!_world.currentPhaseId()) {
+		uint32 bootPhase = _initialWorld.phaseContaining(_mortadelo.objectId());
+		gotoPhase(bootPhase ? bootPhase : 0x101);
+	}
 
 	// Standard and hot cursor of the original mouse handler
 	loadCursor(0x00030001, _standardCursor);

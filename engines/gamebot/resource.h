@@ -240,6 +240,10 @@ public:
 	int findPhase(uint32 phaseId) const;
 	const ObjectEntry *findObject(uint32 objectId) const;
 
+	// The phase containing the given object (e.g. the characters at
+	// boot time), or 0
+	uint32 phaseContaining(uint32 objectId) const;
+
 private:
 	Common::Array<PhaseEntry> _phases;
 	Common::Array<LayerEntry> _layers;

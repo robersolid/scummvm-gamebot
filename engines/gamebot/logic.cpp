@@ -447,6 +447,18 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 	case kEventDialogActivate:
 		activateDialog(param2);
 		break;
+	case kEventAppPhaseChange:
+		// The intro chain jumps to 0x99, the original main menu;
+		// until that UI exists a new game starts at the chapter 1 map
+		if (!g_engine->gotoPhase(param2)) {
+			debugC(kDebugActions, "Phase %08x is not a room (menu?), starting chapter 1", param2);
+			g_engine->gotoPhase(0x101);
+		}
+		return; // gotoPhase already ran any follow-up chain
+	case kEventOptionsActivate:
+		debugC(kDebugActions, "Options menu requested (TODO), starting chapter 1");
+		g_engine->gotoPhase(0x101);
+		return;
 	case 0x09000002: // evDialogSetFrase: toggle a sentence by text id
 		for (auto &dialog : _dialogs) {
 			for (uint i = 0; i < dialog._value.size(); i++) {
