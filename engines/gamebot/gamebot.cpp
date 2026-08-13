@@ -24,10 +24,13 @@
 #include "common/endian.h"
 #include "common/events.h"
 #include "common/file.h"
+#include "common/substream.h"
 #include "common/tokenizer.h"
 #include "engines/util.h"
 #include "graphics/cursorman.h"
 #include "graphics/framelimiter.h"
+#include "graphics/paletteman.h"
+#include "video/flic_decoder.h"
 
 #include "gamebot/gamebot.h"
 #include "gamebot/console.h"
@@ -157,6 +160,75 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	}
 
 	_verbPalette.open(screenPos, hit.objectId);
+}
+
+bool GamebotEngine::playVideo(uint32 flicResId) {
+	const ResourceEntry *e = _resources.findByResId(flicResId);
+	if (!e || e->type != kResAnimationFlic) {
+		warning("Video %08x not found", flicResId);
+		return false;
+	}
+
+	// The blob only holds the sound code and the location of the FLC
+	// stream elsewhere in the resource file
+	byte *params = _resources.readBlob(*e);
+	if (!params)
+		return false;
+	uint32 soundCode = READ_LE_UINT32(params);
+	uint32 flicLocation = READ_LE_UINT32(params + 4);
+	uint32 flicSize = READ_LE_UINT32(params + 8);
+	delete[] params;
+
+	// The decoder gets its own file handle: the mixer may still be
+	// streaming music from the shared one when we start
+	Common::File *file = new Common::File();
+	if (!file->open(GAMEBOT_RESOURCE_FILE)) {
+		delete file;
+		return false;
+	}
+	Common::SeekableSubReadStream *stream = new Common::SeekableSubReadStream(
+		file, flicLocation, flicLocation + flicSize, DisposeAfterUse::YES);
+
+	Video::FlicDecoder decoder;
+	if (!decoder.loadStream(stream)) {
+		warning("Video %08x is not a valid FLC", flicResId);
+		return false;
+	}
+
+	debugC(kDebugResources, "Playing video %08x: %d frames %dx%d, sound %08x",
+		flicResId, decoder.getFrameCount(), decoder.getWidth(), decoder.getHeight(), soundCode);
+	_sounds.stopAll();
+	if (soundCode)
+		_sounds.playSound(soundCode);
+	decoder.start();
+
+	bool skipped = false;
+	while (!shouldQuit() && !decoder.endOfVideo() && !skipped) {
+		if (decoder.needsUpdate()) {
+			const Graphics::Surface *frame = decoder.decodeNextFrame();
+			if (frame) {
+				if (decoder.hasDirtyPalette())
+					g_system->getPaletteManager()->setPalette(decoder.getPalette(), 0, 256);
+				_screen->blitFrom(*frame);
+				_screen->update();
+			}
+		}
+
+		Common::Event event;
+		while (g_system->getEventManager()->pollEvent(event)) {
+			if (event.type == Common::EVENT_LBUTTONDOWN ||
+					(event.type == Common::EVENT_KEYDOWN &&
+					event.kbd.keycode == Common::KEYCODE_ESCAPE))
+				skipped = true;
+		}
+		g_system->delayMillis(10);
+	}
+
+	_sounds.stopSound();
+	_world.applyPalette();
+	if (_world.musicCode())
+		_sounds.playMusic(_world.musicCode());
+	return true;
 }
 
 bool GamebotEngine::gotoPhase(uint32 phaseId) {

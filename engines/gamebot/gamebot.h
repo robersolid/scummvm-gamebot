@@ -116,6 +116,10 @@ public:
 	// Loads a phase and places the characters at its entry positions
 	bool gotoPhase(uint32 phaseId);
 
+	// Plays a full-screen FLC video (modal, skippable with a click
+	// or escape), then restores the phase palette and music
+	bool playVideo(uint32 flicResId);
+
 	uint32 getRandomNumber(uint maxNum) {
 		return _randomSource.getRandomNumber(maxNum);
 	}

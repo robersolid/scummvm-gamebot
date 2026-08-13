@@ -318,10 +318,12 @@ void Logic::runAction(const ActionRule &rule) {
 		break;
 	case kActionStartAnimation: {
 		const ResourceEntry *e = g_engine->resources().findByResId(rule.actionParam1);
-		if (e)
-			g_engine->world().startAnimation(e->objectId, rule.actionParam1);
-		else
+		if (!e)
 			warning("Animation %08x not found", rule.actionParam1);
+		else if (e->type == kResAnimationFlic)
+			g_engine->playVideo(rule.actionParam1);
+		else
+			g_engine->world().startAnimation(e->objectId, rule.actionParam1);
 		break;
 	}
 	case kActionEnable:
@@ -357,7 +359,9 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 		break;
 	case kEventObjActivateAnim: {
 		const ResourceEntry *e = g_engine->resources().findByResId(param2);
-		if (e)
+		if (e && e->type == kResAnimationFlic)
+			g_engine->playVideo(param2);
+		else if (e)
 			g_engine->world().startAnimation(e->objectId, param2);
 		break;
 	}

@@ -76,23 +76,26 @@ bool World::loadPhaseInit(uint32 phaseId) {
 	_phaseHeight = (int16)(READ_LE_UINT32(data + 4) + 1);
 
 	// Palette entries are 4 bytes (red, green, blue, flags)
-	byte palette[256 * 3];
 	for (uint i = 0; i < 256; i++) {
-		palette[i * 3] = data[16 + i * 4];
-		palette[i * 3 + 1] = data[16 + i * 4 + 1];
-		palette[i * 3 + 2] = data[16 + i * 4 + 2];
+		_palette[i * 3] = data[16 + i * 4];
+		_palette[i * 3 + 1] = data[16 + i * 4 + 1];
+		_palette[i * 3 + 2] = data[16 + i * 4 + 2];
 	}
-	g_system->getPaletteManager()->setPalette(palette, 0, 256);
+	applyPalette();
 
-	uint32 musicCode = READ_LE_UINT32(data + 8);
+	_musicCode = READ_LE_UINT32(data + 8);
 	debugC(kDebugResources, "Phase %08x: %dx%d, music %x, fx %x", phaseId,
-		_phaseWidth, _phaseHeight, musicCode, READ_LE_UINT32(data + 12));
-	if (musicCode)
-		g_engine->sounds().playMusic(musicCode);
+		_phaseWidth, _phaseHeight, _musicCode, READ_LE_UINT32(data + 12));
+	if (_musicCode)
+		g_engine->sounds().playMusic(_musicCode);
 	else
 		g_engine->sounds().stopMusic();
 	delete[] data;
 	return true;
+}
+
+void World::applyPalette() const {
+	g_system->getPaletteManager()->setPalette(_palette, 0, 256);
 }
 
 void World::loadWalkMap(uint32 phaseId) {

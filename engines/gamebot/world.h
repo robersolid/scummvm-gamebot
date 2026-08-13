@@ -64,6 +64,10 @@ public:
 	void setEnabled(uint32 objectId, bool enabled);
 	bool startAnimation(uint32 objectId, uint32 resId);
 
+	// Re-applies the palette of the current phase (after a video)
+	void applyPalette() const;
+	uint32 musicCode() const { return _musicCode; }
+
 	// Walk map access for the characters
 	bool hasWalkMap() const { return _mapWidth != 0; }
 	uint mapWidth() const { return _mapWidth; }
@@ -167,6 +171,8 @@ private:
 	uint32 _phaseId = 0;
 	int16 _phaseWidth = 0, _phaseHeight = 0;
 	Common::Point _origin; // scroll offset of the visible window
+	byte _palette[256 * 3] = {};
+	uint32 _musicCode = 0;
 
 	Common::Array<DrawItem> _items; // in back-to-front draw order
 	Common::Array<Hotspot> _hotspots;

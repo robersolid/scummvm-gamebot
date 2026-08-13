@@ -22,6 +22,8 @@
 #include "audio/audiostream.h"
 #include "audio/decoders/adpcm.h"
 #include "common/endian.h"
+#include "common/substream.h"
+#include "video/flic_decoder.h"
 #include "common/file.h"
 #include "common/memstream.h"
 #include "common/system.h"
@@ -89,6 +91,68 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("rclick", WRAP_METHOD(Console, cmdClick));
 	registerCmd("usewith", WRAP_METHOD(Console, cmdUseWith));
 	registerCmd("dumpsound", WRAP_METHOD(Console, cmdDumpSound));
+	registerCmd("playflic", WRAP_METHOD(Console, cmdPlayFlic));
+	registerCmd("dumpflic", WRAP_METHOD(Console, cmdDumpFlic));
+}
+
+bool Console::cmdPlayFlic(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: playflic <resId>\n");
+		return true;
+	}
+	g_engine->playVideo(parseId(argv[1]));
+	return true;
+}
+
+// Decodes one frame of a video to a BMP for validation
+bool Console::cmdDumpFlic(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: dumpflic <resId> [frame]\n");
+		return true;
+	}
+
+	ResourceFile &res = g_engine->resources();
+	const ResourceEntry *e = res.findByResId(parseId(argv[1]));
+	if (!e || e->type != kResAnimationFlic) {
+		debugPrintf("Video not found\n");
+		return true;
+	}
+	byte *params = res.readBlob(*e);
+	if (!params)
+		return true;
+	uint32 flicLocation = READ_LE_UINT32(params + 4);
+	uint32 flicSize = READ_LE_UINT32(params + 8);
+	delete[] params;
+
+	Common::File *file = new Common::File();
+	if (!file->open(GAMEBOT_RESOURCE_FILE)) {
+		delete file;
+		return true;
+	}
+	Video::FlicDecoder decoder;
+	if (!decoder.loadStream(new Common::SeekableSubReadStream(
+			file, flicLocation, flicLocation + flicSize, DisposeAfterUse::YES))) {
+		debugPrintf("Not a valid FLC\n");
+		return true;
+	}
+
+	uint targetFrame = (argc > 2) ? strtoul(argv[2], nullptr, 0) : 1;
+	const Graphics::Surface *frame = nullptr;
+	for (uint i = 0; i < targetFrame && !decoder.endOfVideo(); i++)
+		frame = decoder.decodeNextFrame();
+	if (!frame) {
+		debugPrintf("Could not decode frame %u\n", targetFrame);
+		return true;
+	}
+
+	Common::String fileName = Common::String::format(
+		"gamebot-dumps/flic-%08x-f%u.bmp", e->resId, targetFrame);
+	Common::DumpFile out;
+	if (out.open(Common::Path(fileName), true) &&
+			Image::writeBMP(out, *frame, decoder.getPalette(), 256))
+		debugPrintf("Wrote %s (%u of %u frames, %ux%u)\n", fileName.c_str(),
+			targetFrame, decoder.getFrameCount(), frame->w, frame->h);
+	return true;
 }
 
 // Decodes an ADPCM sound to a PCM wav file for validation
