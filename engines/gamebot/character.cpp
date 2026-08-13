@@ -52,8 +52,49 @@ static int cellDisplacement(byte cell) {
 Character::~Character() {
 	delete[] _staticFront.pixels;
 	delete[] _staticBack.pixels;
+	delete[] _talkFront.frames;
+	delete[] _talkBack.frames;
 	for (uint i = 0; i < 8; i++)
 		delete[] _walkAnims[i].frames;
+}
+
+bool Character::loadAnimResource(const ResourceEntry &e, WalkAnim &anim) {
+	ResourceFile &res = g_engine->resources();
+	byte *data = res.readBlob(e);
+	if (!data)
+		return false;
+	anim.rect = Common::Rect(
+		READ_LE_INT32(data), READ_LE_INT32(data + 4),
+		READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+	anim.frameSize = anim.rect.width() * anim.rect.height();
+	anim.imageCount = READ_LE_UINT32(data + 16);
+	uint32 sequenceCount = READ_LE_UINT32(data + 20);
+	anim.framePeriod = READ_LE_UINT32(data + 24);
+	uint32 imageLocation = READ_LE_UINT32(data + 32);
+
+	anim.sequence.resize(sequenceCount);
+	for (uint32 s = 0; s < sequenceCount; s++)
+		anim.sequence[s] = READ_LE_UINT32(data + 36 + s * 12);
+	delete[] data;
+
+	anim.frames = new byte[anim.frameSize * anim.imageCount];
+	Common::File &file = res.file();
+	file.seek(imageLocation);
+	if (file.read(anim.frames, anim.frameSize * anim.imageCount) !=
+			anim.frameSize * anim.imageCount) {
+		warning("Could not read frames of %08x", e.resId);
+		delete[] anim.frames;
+		anim.frames = nullptr;
+		return false;
+	}
+	anim.valid = true;
+	return true;
+}
+
+void Character::setTalking(bool talking) {
+	_talking = talking;
+	_talkStep = 0;
+	_talkStepTime = 0;
 }
 
 bool Character::load(uint32 objectId) {
@@ -88,36 +129,12 @@ bool Character::load(uint32 objectId) {
 		}
 
 		bool isAnimation = e.type >= kResAnimationAuto && e.type <= kResAnimationEventMobile;
-		if (isAnimation && code >= kWalkSouthWest && code <= kWalkWest) {
-			WalkAnim &anim = _walkAnims[code - kWalkSouthWest];
-			byte *data = res.readBlob(e);
-			if (!data)
-				continue;
-			anim.rect = Common::Rect(
-				READ_LE_INT32(data), READ_LE_INT32(data + 4),
-				READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
-			anim.frameSize = anim.rect.width() * anim.rect.height();
-			anim.imageCount = READ_LE_UINT32(data + 16);
-			uint32 sequenceCount = READ_LE_UINT32(data + 20);
-			uint32 imageLocation = READ_LE_UINT32(data + 32);
-
-			anim.sequence.resize(sequenceCount);
-			for (uint32 s = 0; s < sequenceCount; s++)
-				anim.sequence[s] = READ_LE_UINT32(data + 36 + s * 12);
-			delete[] data;
-
-			anim.frames = new byte[anim.frameSize * anim.imageCount];
-			Common::File &file = res.file();
-			file.seek(imageLocation);
-			if (file.read(anim.frames, anim.frameSize * anim.imageCount) !=
-					anim.frameSize * anim.imageCount) {
-				warning("Could not read walk frames %08x", e.resId);
-				delete[] anim.frames;
-				anim.frames = nullptr;
-				continue;
-			}
-			anim.valid = true;
-		}
+		if (isAnimation && code >= kWalkSouthWest && code <= kWalkWest)
+			loadAnimResource(e, _walkAnims[code - kWalkSouthWest]);
+		else if (isAnimation && code == kResTalkFront)
+			loadAnimResource(e, _talkFront);
+		else if (isAnimation && code == kResTalkBack)
+			loadAnimResource(e, _talkBack);
 	}
 
 	if (!_staticFront.pixels) {
@@ -380,6 +397,23 @@ bool Character::walkTo(const World &world, Common::Point target) {
 }
 
 void Character::tick(uint32 millis, const World &world) {
+	// Talking animation runs on its own clock while a phrase shows
+	if (_talking) {
+		const WalkAnim &anim = (_orient < kOrientEast || _orient > kOrientWest)
+			? _talkBack : _talkFront;
+		if (anim.valid && !anim.sequence.empty()) {
+			if (!_talkStepTime)
+				_talkStepTime = millis + anim.framePeriod;
+			while (millis >= _talkStepTime) {
+				_talkStepTime += anim.framePeriod ? anim.framePeriod : 100;
+				_talkStep++;
+				if (_talkStep >= anim.sequence.size() ||
+						anim.sequence[_talkStep] >= SequenceStep::kAutoDisable)
+					_talkStep = 0;
+			}
+		}
+	}
+
 	if (!_walking)
 		return;
 	if (!_nextTick)
@@ -460,6 +494,18 @@ void Character::draw(Graphics::Screen *screen, const Common::Point &origin) cons
 			imageIndex = 1;
 		drawScaled(screen, anim.frames + (imageIndex - 1) * anim.frameSize, anim.rect, origin);
 		return;
+	}
+
+	if (_talking) {
+		const WalkAnim &anim = (_orient < kOrientEast || _orient > kOrientWest)
+			? _talkBack : _talkFront;
+		if (anim.valid) {
+			uint32 imageIndex = anim.sequence.empty() ? 1 : anim.sequence[_talkStep];
+			if (imageIndex < 1 || imageIndex > anim.imageCount)
+				imageIndex = 1;
+			drawScaled(screen, anim.frames + (imageIndex - 1) * anim.frameSize, anim.rect, origin);
+			return;
+		}
 	}
 
 	const Sprite &sprite = (_orient < kOrientEast || _orient > kOrientWest)

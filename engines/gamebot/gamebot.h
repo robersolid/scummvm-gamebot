@@ -55,6 +55,7 @@ private:
 	Common::RandomSource _randomSource;
 
 	ResourceFile _resources;    // Resdata.res: graphics, sounds, phase data
+	ResourceFile _dialogFile;   // default.dlg: initial dialog states
 	ActionFile _actions;        // Actions.act: per-object action rules
 	WorldFile _initialWorld;    // default.def: world state for a new game
 	World _world;               // runtime world (current phase)
@@ -94,6 +95,7 @@ public:
 	Common::String getGameId() const;
 
 	ResourceFile &resources() { return _resources; }
+	ResourceFile &dialogFile() { return _dialogFile; }
 	ActionFile &actions() { return _actions; }
 	WorldFile &initialWorld() { return _initialWorld; }
 	World &world() { return _world; }

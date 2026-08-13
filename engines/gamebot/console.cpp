@@ -80,6 +80,26 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("verb", WRAP_METHOD(Console, cmdVerb));
 	registerCmd("inv", WRAP_METHOD(Console, cmdInventory));
 	registerCmd("say", WRAP_METHOD(Console, cmdSay));
+	registerCmd("dialog", WRAP_METHOD(Console, cmdDialog));
+	registerCmd("pick", WRAP_METHOD(Console, cmdPick));
+}
+
+bool Console::cmdDialog(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: dialog <dialogResId>\n");
+		return true;
+	}
+	g_engine->logic().activateDialog(parseId(argv[1]));
+	return true;
+}
+
+bool Console::cmdPick(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: pick <lineIndex>\n");
+		return true;
+	}
+	g_engine->logic().pickSentence((uint)atoi(argv[1]));
+	return true;
 }
 
 bool Console::cmdVerb(int argc, const char **argv) {
@@ -187,6 +207,7 @@ bool Console::cmdWait(int argc, const char **argv) {
 		g_engine->logic().update(millis);
 		g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
 		g_engine->logic().writer().draw(g_engine->_screen);
+		g_engine->logic().drawDialog(g_engine->_screen);
 		g_engine->_screen->update();
 		g_system->delayMillis(10);
 	}
@@ -612,6 +633,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	// Render a fresh frame and save it with the current system palette
 	g_engine->world().draw(g_engine->_screen, &g_engine->mortadelo());
 	g_engine->logic().writer().draw(g_engine->_screen);
+	g_engine->logic().drawDialog(g_engine->_screen);
 	byte palette[256 * 3];
 	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
 

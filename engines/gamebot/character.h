@@ -58,6 +58,8 @@ enum Orientation {
 enum CharacterResource {
 	kResStaticFront = 0x01, // facing the player (E to W through S)
 	kResStaticBack = 0x02,  // facing away (W to E through N)
+	kResTalkFront = 0x10,   // talking animation
+	kResTalkBack = 0x11,
 	kResWalkBase = 0x20,    // + 1..8: walk animation per direction code
 };
 
@@ -102,6 +104,11 @@ public:
 	void tick(uint32 millis, const World &world);
 	void draw(Graphics::Screen *screen, const Common::Point &origin) const;
 
+	// Plays or stops the talking animation (front or back depending
+	// on the orientation, as in the original evPersHabla handling)
+	void setTalking(bool talking);
+	bool isTalking() const { return _talking; }
+
 	uint32 objectId() const { return _objectId; }
 	bool isLoaded() const { return _loaded; }
 	bool isWalking() const { return _walking; }
@@ -128,8 +135,11 @@ private:
 		byte *frames = nullptr;
 		uint32 frameSize = 0;
 		uint32 imageCount = 0;
+		uint32 framePeriod = 0;
 		Common::Array<uint32> sequence; // frame indexes (1-based)
 	};
+
+	bool loadAnimResource(const ResourceEntry &e, WalkAnim &anim);
 
 	// Selects the walk animation for an orientation, setting _invert
 	// when the direction mirrors another one (original SelectWalk)
@@ -143,6 +153,11 @@ private:
 
 	Sprite _staticFront, _staticBack;
 	WalkAnim _walkAnims[8]; // indexed by walk code - 0x21
+	WalkAnim _talkFront, _talkBack;
+
+	bool _talking = false;
+	uint32 _talkStep = 0;
+	uint32 _talkStepTime = 0;
 
 	int16 _x = 0, _y = 0;
 	uint16 _layer = 0, _orient = kOrientSouth;

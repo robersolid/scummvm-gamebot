@@ -134,9 +134,87 @@ void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 	if (!matched) {
 		// No rule handled the verb: the original answers with a
 		// generic "I can't do that" phrase chosen by the TCAU flags
-		debugC(kDebugActions, "No rule for %s on %08x (generic response pending)",
+		const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
+		debugC(kDebugActions, "No rule for %s on %08x, generic response",
 			eventName(eventId) ? eventName(eventId) : "?", objectId);
+		sayGenericResponse(eventId, object ? object->impossibleResponses : 0);
 	}
+}
+
+// Generic response phrase table of the original Character.cpp: per
+// category up to nine phrase codes picked at random. The category
+// depends on the verb, whether the object is a person (kTypePerson)
+// and whether "maybe another way" applies (kTake/kOpen/kUse flags).
+void Logic::sayGenericResponse(uint32 verbEventId, uint16 responseFlags) {
+	enum { kTypePerson = 0x01, kFlagTake = 0x02, kFlagOpen = 0x04, kFlagUse = 0x08 };
+	enum { kCantOpen = 0x01, kCantPick = 0x03, kCantTalk = 0x05, kCantLook = 0x07,
+		kCantUse = 0x09, kMaybe = 0x0a };
+
+	static const uint16 kResponses[][9] = {
+		{ 0x9111, 0x9112, 0x9113, 0x9114, 0x9115, 0x9116, 0x9117, 0x9118, 0 },
+		{ 0x9121, 0x9122, 0x9123, 0x9124, 0x9125, 0x9126, 0x9127, 0x9128, 0x9129 },
+		{ 0x9131, 0x9132, 0x9133, 0x9134, 0x9135, 0x9136, 0x9137, 0, 0 },
+		{ 0x9141, 0x9142, 0x9143, 0x9144, 0x9145, 0x9146, 0x9147, 0x9148, 0x9149 },
+		{ 0x9151, 0x9152, 0x9153, 0x9154, 0x9155, 0x9156, 0, 0, 0 },
+		{ 0x9161, 0x9162, 0x9163, 0x9164, 0x9165, 0x9166, 0, 0, 0 },
+		{ 0x9171, 0x9172, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0x9181, 0x9182, 0x9183, 0x9184, 0, 0, 0, 0, 0 },
+		{ 0x91a1, 0x91a2, 0x91a3, 0x91a4, 0x91a5, 0x91a6, 0x91a7, 0, 0 },
+		{ 0x91b1, 0x91b2, 0x91b3, 0x91b4, 0x91b5, 0, 0, 0, 0 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0x91c1, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0x91d1, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0x91e1, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0x91f1, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{ 0x91f2, 0x91f3, 0, 0, 0, 0, 0, 0, 0 },
+	};
+
+	int index = 0;
+	switch (verbEventId) {
+	case kEventObjLookNow:
+		index = kCantLook;
+		break;
+	case kEventObjOpenNow:
+		index = kCantOpen + ((responseFlags & kFlagOpen) ? kMaybe : 0);
+		break;
+	case kEventObjTalkNow:
+		index = kCantTalk;
+		break;
+	case kEventObjTakeNow:
+		index = kCantPick + ((responseFlags & kFlagTake) ? kMaybe : 0);
+		break;
+	case kEventObjUseNow:
+	case kEventObjUsarInvent:
+		index = kCantUse + ((responseFlags & kFlagUse) ? kMaybe : 0);
+		break;
+	default:
+		return;
+	}
+	if (index && (responseFlags & kTypePerson))
+		index--;
+	if (!kResponses[index][0])
+		index = 0;
+
+	uint16 code = 0;
+	while (!code)
+		code = kResponses[index][g_engine->getRandomNumber(8)];
+
+	// Phrase codes belong to the master character's own resources
+	uint32 textCode = ((g_engine->mortadelo().objectId() << 8) & 0xffff0000) | code;
+	sayPhrase(textCode, textCode - 0x100);
+}
+
+void Logic::sayPhrase(uint32 textCode, uint32 soundCode) {
+	_writer.showTextCode(textCode);
+	if (soundCode) {
+		debugC(kDebugSound, "Phrase wants voice %08x", soundCode);
+		_phraseSound = soundCode;
+	}
+	g_engine->mortadelo().setTalking(_writer.active());
 }
 
 void Logic::update(uint32 millis) {
@@ -235,11 +313,7 @@ void Logic::runAction(const ActionRule &rule) {
 		g_engine->world().setEnabled(rule.actionParam1, false);
 		break;
 	case kActionPhraseOn:
-		_writer.showTextCode(rule.actionParam1);
-		if (rule.actionParam2) {
-			debugC(kDebugSound, "Phrase wants voice %08x", rule.actionParam2);
-			_phraseSound = rule.actionParam2;
-		}
+		sayPhrase(rule.actionParam1, rule.actionParam2);
 		break;
 	case kActionInputEnable:
 		debugC(kDebugActions, "Input enable %x (TODO)", rule.actionParam1);
@@ -270,7 +344,19 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 		break;
 	}
 	case kEventDialogActivate:
-		debugC(kDebugActions, "Dialog %08x requested (TODO: DialogMaster)", param2);
+		activateDialog(param2);
+		break;
+	case 0x09000002: // evDialogSetFrase: toggle a sentence by text id
+		for (auto &dialog : _dialogs) {
+			for (uint i = 0; i < dialog._value.size(); i++) {
+				if (dialog._value[i].textId == param2) {
+					if (param3)
+						dialog._value[i].flags |= kDialogActive;
+					else
+						dialog._value[i].flags &= ~kDialogActive;
+				}
+			}
+		}
 		break;
 	default:
 		break;
@@ -279,6 +365,8 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 }
 
 void Logic::onPhraseEnded() {
+	g_engine->mortadelo().setTalking(false);
+
 	// The original signals the end of a spoken phrase with an
 	// AnimEnded event carrying the voice code, which rules use to
 	// chain reactions
@@ -287,10 +375,186 @@ void Logic::onPhraseEnded() {
 		_phraseSound = 0;
 		dispatchEvent(kEventObjAnimEnded, sound, 0);
 	}
+
+	// Inside a conversation the spoken line either runs the NPC's
+	// answer animation or goes straight back to the sentence list
+	if (_currentDialog && !_dialogOpen && !_pendingAnswerAnim) {
+		if (_answerAnim) {
+			uint32 anim = _answerAnim;
+			_answerAnim = 0;
+			const ResourceEntry *e = g_engine->resources().findByResId(anim);
+			if (e && g_engine->world().startAnimation(e->objectId, anim)) {
+				_pendingAnswerAnim = anim;
+				return;
+			}
+			debugC(kDebugActions, "Answer animation %08x unavailable", anim);
+		}
+		if (_sentenceFlags & kDialogGoodbye)
+			endDialog();
+		else
+			showDialogList();
+	}
 }
 
 void Logic::onAnimationEnded(uint32 resId) {
+	if (_pendingAnswerAnim && resId == _pendingAnswerAnim) {
+		_pendingAnswerAnim = 0;
+		if (_sentenceFlags & kDialogGoodbye)
+			endDialog();
+		else
+			showDialogList();
+		return;
+	}
 	dispatchEvent(kEventObjAnimEnded, resId, 0);
+}
+
+bool Logic::loadDialog(uint32 dialogId) {
+	if (_dialogs.contains(dialogId))
+		return true;
+
+	// The state file (default.dlg) carries the initial activation
+	// flags; the resource file has the pristine sentences
+	ResourceFile *source = &g_engine->dialogFile();
+	const ResourceEntry *e = source->count() ? source->findByResId(dialogId) : nullptr;
+	if (!e) {
+		source = &g_engine->resources();
+		e = source->findByResId(dialogId);
+	}
+	if (!e || e->type != kResDialog) {
+		warning("Dialog %08x not found", dialogId);
+		return false;
+	}
+
+	byte *data = source->readBlob(*e);
+	if (!data)
+		return false;
+
+	uint32 count = READ_LE_UINT32(data);
+	Common::Array<DialogSentence> sentences;
+	sentences.resize(count);
+	for (uint32 i = 0; i < count; i++) {
+		const byte *p = data + 4 + i * 16;
+		sentences[i].textId = READ_LE_UINT32(p);
+		sentences[i].soundId = READ_LE_UINT32(p + 4);
+		sentences[i].animId = READ_LE_UINT32(p + 8);
+		sentences[i].flags = READ_LE_UINT32(p + 12);
+	}
+	delete[] data;
+	_dialogs[dialogId] = sentences;
+	debugC(kDebugActions, "Dialog %08x loaded: %u sentences", dialogId, count);
+	return true;
+}
+
+void Logic::activateDialog(uint32 dialogId) {
+	if (!loadDialog(dialogId))
+		return;
+	_currentDialog = dialogId;
+	_answerAnim = 0;
+	_pendingAnswerAnim = 0;
+	_sentenceFlags = 0;
+	showDialogList();
+}
+
+void Logic::showDialogList() {
+	_visibleSentences.clear();
+	const Common::Array<DialogSentence> &sentences = _dialogs[_currentDialog];
+	for (uint i = 0; i < sentences.size(); i++) {
+		if (sentences[i].flags & kDialogActive)
+			_visibleSentences.push_back(i);
+	}
+	if (_visibleSentences.empty()) {
+		endDialog();
+		return;
+	}
+	_dialogOpen = true;
+	debugC(kDebugActions, "Dialog %08x offers %u sentences",
+		_currentDialog, _visibleSentences.size());
+}
+
+void Logic::endDialog() {
+	uint32 dialogId = _currentDialog;
+	_currentDialog = 0;
+	_dialogOpen = false;
+	_visibleSentences.clear();
+	if (dialogId) {
+		debugC(kDebugActions, "Dialog %08x ended", dialogId);
+		dispatchEvent(0x09000004 /* evDialogEnded */, dialogId, 0);
+	}
+}
+
+void Logic::pickSentence(uint index) {
+	if (!_dialogOpen || index >= _visibleSentences.size())
+		return;
+	DialogSentence &sentence = _dialogs[_currentDialog][_visibleSentences[index]];
+	_dialogOpen = false;
+	_visibleSentences.clear();
+
+	if (sentence.flags & kDialogDeactivate)
+		sentence.flags &= ~kDialogActive;
+	_sentenceFlags = sentence.flags;
+	_answerAnim = (sentence.flags & kDialogAnswer) ? sentence.animId : 0;
+
+	debugC(kDebugActions, "Dialog line %08x picked (flags %x)", sentence.textId, sentence.flags);
+	if (sentence.textId && sentence.soundId) {
+		if (sentence.flags & kDialogAnimation)
+			handleMessage(kEventObjActivateAnim, sentence.soundId, 0);
+		else {
+			sayPhrase(sentence.textId, sentence.soundId);
+			return;
+		}
+	}
+	// No spoken line: continue the flow at once
+	if (_sentenceFlags & kDialogGoodbye)
+		endDialog();
+	else if (!_answerAnim)
+		showDialogList();
+}
+
+// Sentence list at the bottom of the screen, one line per active
+// sentence; the original renders them in the dialog font colors
+void Logic::drawDialog(Graphics::Screen *screen) const {
+	if (!_dialogOpen)
+		return;
+
+	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	if (!font)
+		return;
+
+	byte palette[256 * 3];
+	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
+	int bright = 255, dark = 254, maxSum = -1, minSum = 999;
+	for (int i = 1; i < 256; i++) {
+		int sum = palette[i * 3] + palette[i * 3 + 1] + palette[i * 3 + 2];
+		if (sum > maxSum) { maxSum = sum; bright = i; }
+		if (sum < minSum) { minSum = sum; dark = i; }
+	}
+
+	const int lineHeight = font->getFontHeight() + 2;
+	int y = screen->h - (int)_visibleSentences.size() * lineHeight - 4;
+	for (uint i = 0; i < _visibleSentences.size(); i++, y += lineHeight) {
+		const DialogSentence &sentence = _dialogs[_currentDialog][_visibleSentences[i]];
+		const ResourceEntry *e = g_engine->resources().findByResId(sentence.textId);
+		if (!e)
+			continue;
+		byte *data = g_engine->resources().readBlob(*e);
+		if (!data)
+			continue;
+		Common::U32String text(Common::String((const char *)data, e->size), Common::kISO8859_1);
+		delete[] data;
+		font->drawString(screen, text, 11, y + 1, screen->w - 20, dark);
+		font->drawString(screen, text, 10, y, screen->w - 20, bright);
+	}
+}
+
+bool Logic::handleDialogClick(const Common::Point &screenPos) {
+	if (!_dialogOpen)
+		return false;
+	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	const int lineHeight = (font ? font->getFontHeight() : 12) + 2;
+	int top = kScreenHeight - (int)_visibleSentences.size() * lineHeight - 4;
+	if (screenPos.y >= top)
+		pickSentence((screenPos.y - top) / lineHeight);
+	return true;
 }
 
 } // End of namespace Gamebot

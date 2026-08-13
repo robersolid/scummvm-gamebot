@@ -52,6 +52,8 @@ private:
 	bool cmdVerb(int argc, const char **argv);
 	bool cmdInventory(int argc, const char **argv);
 	bool cmdSay(int argc, const char **argv);
+	bool cmdDialog(int argc, const char **argv);
+	bool cmdPick(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
 	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,

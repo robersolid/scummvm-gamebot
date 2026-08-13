@@ -289,9 +289,14 @@ bool World::gotoPhase(uint32 phaseId) {
 }
 
 void World::updateItem(DrawItem &item, uint32 millis) {
+	// While an event animation runs (started by rule or dialog), the
+	// automatic ones wait, as in the original tick handling
+	bool eventAnimRunning = item.activeAnim >= 0 &&
+		item.anims[item.activeAnim].running && !item.anims[item.activeAnim].autoFire;
+
 	// Start whichever animation reaches its fire time; a firing
 	// animation becomes the active resource of the object
-	for (uint a = 0; a < item.anims.size(); a++) {
+	for (uint a = 0; a < item.anims.size() && !eventAnimRunning; a++) {
 		Animation &anim = item.anims[a];
 		if (anim.running || !anim.autoFire)
 			continue;
@@ -350,9 +355,16 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 		debugC(3, kDebugEvents, "Animation %08x/%08x step %u frame %u",
 			item.objectId, anim.resId, anim.seqPos, imageIndex);
 
-		if (anim.seqPos < anim.sequence.size() && anim.sequence[anim.seqPos].soundCode)
-			debugC(2, kDebugSound, "Animation %08x/%08x wants sound %x",
-				item.objectId, anim.resId, anim.sequence[anim.seqPos].soundCode);
+		if (anim.seqPos < anim.sequence.size()) {
+			const SequenceStep &step = anim.sequence[anim.seqPos];
+			if (step.soundCode)
+				debugC(2, kDebugSound, "Animation %08x/%08x wants sound %x",
+					item.objectId, anim.resId, step.soundCode);
+			// NPC speech: answer animations carry the spoken text of
+			// each frame in the sequence
+			if (step.textCode)
+				g_engine->logic().writer().showTextCode(step.textCode);
+		}
 	}
 }
 

@@ -81,6 +81,22 @@ enum Verb {
 	kVerbLeave
 };
 
+// Dialog sentence flags (original DialogMaster.cpp)
+enum DialogFlags {
+	kDialogGoodbye = 0x0001,    // ends the conversation after this line
+	kDialogAnimation = 0x0002,  // trigger an animation instead of speaking
+	kDialogAnswer = 0x0010,     // an answer animation follows the line
+	kDialogDeactivate = 0x0100, // the line disappears once used
+	kDialogActive = 0x1000
+};
+
+struct DialogSentence {
+	uint32 textId = 0;
+	uint32 soundId = 0;
+	uint32 animId = 0;
+	uint32 flags = 0;
+};
+
 // On-screen phrase display (stand-in for the original WriterMaster,
 // which rendered with a Windows GDI font)
 class TextWriter {
@@ -113,6 +129,19 @@ public:
 
 	TextWriter &writer() { return _writer; }
 
+	// Shows a phrase spoken by the master character: text on screen,
+	// talking animation and (eventually) the voice sample
+	void sayPhrase(uint32 textCode, uint32 soundCode);
+
+	// Conversations (original DialogMaster): a dialog resource holds
+	// sentences the player can pick; a picked line is spoken, may run
+	// an answer animation and reopens the list until a goodbye line
+	void activateDialog(uint32 dialogId);
+	void pickSentence(uint index);
+	bool isDialogOpen() const { return _dialogOpen; }
+	void drawDialog(Graphics::Screen *screen) const;
+	bool handleDialogClick(const Common::Point &screenPos);
+
 	// Chain notifications
 	void onPhraseEnded();
 	void onAnimationEnded(uint32 resId);
@@ -124,10 +153,26 @@ private:
 	bool checkConditions(const ActionRule &rule);
 	void runAction(const ActionRule &rule);
 	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3);
+	void sayGenericResponse(uint32 verbEventId, uint16 responseFlags);
+
+	// Loads a dialog's sentences, preferring the state in default.dlg
+	// over the pristine copy in the resource file
+	bool loadDialog(uint32 dialogId);
+	void showDialogList();
+	void endDialog();
 
 	Common::HashMap<uint32, bool> _inventory;
 	TextWriter _writer;
 	uint32 _phraseSound = 0; // voice code of the phrase on screen
+
+	// Conversation state; sentence activation persists per dialog
+	Common::HashMap<uint32, Common::Array<DialogSentence> > _dialogs;
+	uint32 _currentDialog = 0;
+	bool _dialogOpen = false;      // the sentence list is on screen
+	Common::Array<uint> _visibleSentences; // indexes of listed lines
+	uint32 _answerAnim = 0;        // NPC answer to run after the line
+	uint32 _pendingAnswerAnim = 0; // waiting for this anim to finish
+	uint32 _sentenceFlags = 0;     // flags of the picked line
 
 	// Pending walk-then-act interaction
 	uint32 _pendingObject = 0;

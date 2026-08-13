@@ -96,6 +96,10 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 }
 
 void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
+	// An open conversation captures every click
+	if (_logic.handleDialogClick(screenPos))
+		return;
+
 	Common::Point phasePos(screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
 	HitResult hit;
 	if (!_world.hitTest(phasePos, hit)) {
@@ -150,9 +154,15 @@ Common::String GamebotEngine::getGameId() const {
 }
 
 bool GamebotEngine::loadDataFiles() {
-	return _resources.load(GAMEBOT_RESOURCE_FILE) &&
-		_actions.load(GAMEBOT_ACTIONS_FILE) &&
-		_initialWorld.load(GAMEBOT_NEWGAME_FILE);
+	if (!_resources.load(GAMEBOT_RESOURCE_FILE) ||
+			!_actions.load(GAMEBOT_ACTIONS_FILE) ||
+			!_initialWorld.load(GAMEBOT_NEWGAME_FILE))
+		return false;
+
+	// Initial dialog states; optional, sentences fall back to the
+	// pristine copies inside the resource file
+	_dialogFile.load(GAMEBOT_NEWGAME_DIALOG_FILE);
+	return true;
 }
 
 Common::Error GamebotEngine::run() {
@@ -235,6 +245,7 @@ Common::Error GamebotEngine::run() {
 
 		_world.draw(_screen, &_mortadelo);
 		_logic.writer().draw(_screen);
+		_logic.drawDialog(_screen);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();
