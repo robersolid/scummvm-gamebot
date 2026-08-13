@@ -19,8 +19,11 @@
  *
  */
 
+#include "audio/audiostream.h"
+#include "audio/decoders/adpcm.h"
 #include "common/endian.h"
 #include "common/file.h"
+#include "common/memstream.h"
 #include "common/system.h"
 #include "common/tokenizer.h"
 #include "graphics/paletteman.h"
@@ -85,6 +88,65 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("click", WRAP_METHOD(Console, cmdClick));
 	registerCmd("rclick", WRAP_METHOD(Console, cmdClick));
 	registerCmd("usewith", WRAP_METHOD(Console, cmdUseWith));
+	registerCmd("dumpsound", WRAP_METHOD(Console, cmdDumpSound));
+}
+
+// Decodes an ADPCM sound to a PCM wav file for validation
+bool Console::cmdDumpSound(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: dumpsound <resId>\n");
+		return true;
+	}
+
+	ResourceFile &res = g_engine->resources();
+	const ResourceEntry *e = res.findByResId(parseId(argv[1]));
+	if (!e || (e->type != kResSound && e->type != kResFXSound && e->type != kResMusic)) {
+		debugPrintf("Sound resource not found\n");
+		return true;
+	}
+	byte *data = res.readBlob(*e);
+	if (!data)
+		return true;
+
+	Common::MemoryReadStream *memory =
+		new Common::MemoryReadStream(data, e->size, DisposeAfterUse::YES);
+	Audio::RewindableAudioStream *stream = Audio::makeADPCMStream(
+		memory, DisposeAfterUse::YES, e->size, Audio::kADPCMMS, 22050, 1, 512);
+
+	Common::Array<int16> samples;
+	int16 buffer[4096];
+	int got;
+	while ((got = stream->readBuffer(buffer, 4096)) > 0) {
+		for (int i = 0; i < got; i++)
+			samples.push_back(buffer[i]);
+	}
+	delete stream;
+
+	Common::String fileName = Common::String::format(
+		"gamebot-dumps/%08x.wav", e->resId);
+	Common::DumpFile out;
+	if (!out.open(Common::Path(fileName), true)) {
+		debugPrintf("Could not write %s\n", fileName.c_str());
+		return true;
+	}
+	uint32 dataSize = samples.size() * 2;
+	out.writeString("RIFF");
+	out.writeUint32LE(36 + dataSize);
+	out.writeString("WAVEfmt ");
+	out.writeUint32LE(16);
+	out.writeUint16LE(1);      // PCM
+	out.writeUint16LE(1);      // mono
+	out.writeUint32LE(22050);  // rate
+	out.writeUint32LE(22050 * 2);
+	out.writeUint16LE(2);
+	out.writeUint16LE(16);
+	out.writeString("data");
+	out.writeUint32LE(dataSize);
+	for (uint i = 0; i < samples.size(); i++)
+		out.writeSint16LE(samples[i]);
+	debugPrintf("Wrote %s (%u samples, %.2f s)\n", fileName.c_str(),
+		samples.size(), samples.size() / 22050.0);
+	return true;
 }
 
 // Simulates mouse input for scripted validation runs

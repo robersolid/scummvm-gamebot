@@ -103,6 +103,11 @@ class TextWriter {
 public:
 	void showTextCode(uint32 textCode);
 	void showString(const Common::String &text);
+	// Keeps the phrase visible a bit longer (while its voice plays)
+	void keepAlive(uint32 millis) {
+		if (!_text.empty() && millis + 300 > _hideTime)
+			_hideTime = millis + 300;
+	}
 	void update(uint32 millis);
 	void draw(Graphics::Screen *screen) const;
 	bool active() const { return !_text.empty(); }

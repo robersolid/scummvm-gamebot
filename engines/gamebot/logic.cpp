@@ -223,13 +223,17 @@ void Logic::sayGenericResponse(uint32 verbEventId, uint16 responseFlags) {
 void Logic::sayPhrase(uint32 textCode, uint32 soundCode) {
 	_writer.showTextCode(textCode);
 	if (soundCode) {
-		debugC(kDebugSound, "Phrase wants voice %08x", soundCode);
 		_phraseSound = soundCode;
+		g_engine->sounds().playSound(soundCode);
 	}
 	g_engine->mortadelo().setTalking(_writer.active());
 }
 
 void Logic::update(uint32 millis) {
+	// A phrase with a voice stays on screen while the voice plays
+	if (_phraseSound && g_engine->sounds().isSoundPlaying())
+		_writer.keepAlive(millis);
+
 	bool phraseWasActive = _writer.active();
 	_writer.update(millis);
 	if (phraseWasActive && !_writer.active())

@@ -56,6 +56,7 @@ private:
 	bool cmdPick(int argc, const char **argv);
 	bool cmdClick(int argc, const char **argv);
 	bool cmdUseWith(int argc, const char **argv);
+	bool cmdDumpSound(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
 	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,

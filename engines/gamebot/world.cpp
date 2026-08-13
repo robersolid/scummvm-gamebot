@@ -84,8 +84,13 @@ bool World::loadPhaseInit(uint32 phaseId) {
 	}
 	g_system->getPaletteManager()->setPalette(palette, 0, 256);
 
+	uint32 musicCode = READ_LE_UINT32(data + 8);
 	debugC(kDebugResources, "Phase %08x: %dx%d, music %x, fx %x", phaseId,
-		_phaseWidth, _phaseHeight, READ_LE_UINT32(data + 8), READ_LE_UINT32(data + 12));
+		_phaseWidth, _phaseHeight, musicCode, READ_LE_UINT32(data + 12));
+	if (musicCode)
+		g_engine->sounds().playMusic(musicCode);
+	else
+		g_engine->sounds().stopMusic();
 	delete[] data;
 	return true;
 }
@@ -358,8 +363,7 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 		if (anim.seqPos < anim.sequence.size()) {
 			const SequenceStep &step = anim.sequence[anim.seqPos];
 			if (step.soundCode)
-				debugC(2, kDebugSound, "Animation %08x/%08x wants sound %x",
-					item.objectId, anim.resId, step.soundCode);
+				g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType);
 			// NPC speech: answer animations carry the spoken text of
 			// each frame in the sequence
 			if (step.textCode)

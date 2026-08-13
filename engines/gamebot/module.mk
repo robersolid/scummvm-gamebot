@@ -8,6 +8,7 @@ MODULE_OBJS = \
 	logic.o \
 	metaengine.o \
 	resource.o \
+	sound.o \
 	ui.o \
 	world.o
 

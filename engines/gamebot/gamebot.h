@@ -33,6 +33,7 @@
 #include "gamebot/detection.h"
 #include "gamebot/logic.h"
 #include "gamebot/resource.h"
+#include "gamebot/sound.h"
 #include "gamebot/ui.h"
 #include "gamebot/world.h"
 
@@ -64,6 +65,7 @@ private:
 	Logic _logic;               // action rules, inventory, phrases
 	VerbPalette _verbPalette;   // pop-up verb selection
 	InventoryUI _inventoryUI;   // the safe with the collected objects
+	SoundManager _sounds;       // ADPCM voices, effects and music
 	uint32 _linkedObject = 0;   // inventory object selected for use-with
 
 	// Loads the data file indexes. Returns false if a mandatory file
@@ -109,6 +111,7 @@ public:
 	Logic &logic() { return _logic; }
 	VerbPalette &verbPalette() { return _verbPalette; }
 	InventoryUI &inventoryUI() { return _inventoryUI; }
+	SoundManager &sounds() { return _sounds; }
 
 	// Loads a phase and places the characters at its entry positions
 	bool gotoPhase(uint32 phaseId);
