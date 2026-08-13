@@ -21,7 +21,9 @@
 
 #include "common/endian.h"
 #include "common/file.h"
+#include "common/system.h"
 #include "common/tokenizer.h"
+#include "graphics/paletteman.h"
 #include "graphics/surface.h"
 #include "image/bmp.h"
 
@@ -65,6 +67,19 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("dumpres", WRAP_METHOD(Console, cmdDumpRes));
 	registerCmd("dumpmap", WRAP_METHOD(Console, cmdDumpMap));
 	registerCmd("palette", WRAP_METHOD(Console, cmdPalette));
+	registerCmd("goto", WRAP_METHOD(Console, cmdGoto));
+	registerCmd("scroll", WRAP_METHOD(Console, cmdScroll));
+	registerCmd("screenshot", WRAP_METHOD(Console, cmdScreenshot));
+	registerCmd("showwalkmap", WRAP_METHOD(Console, cmdOverlay));
+	registerCmd("showhotspots", WRAP_METHOD(Console, cmdOverlay));
+}
+
+bool Console::cmdOverlay(int argc, const char **argv) {
+	bool &flag = !strcmp(argv[0], "showwalkmap")
+		? g_engine->world()._showWalkMap : g_engine->world()._showHotspots;
+	flag = (argc > 1) ? atoi(argv[1]) != 0 : !flag;
+	debugPrintf("%s = %d\n", argv[0], flag);
+	return true;
 }
 
 bool Console::executeCommand(const Common::String &command) {
@@ -441,6 +456,50 @@ bool Console::cmdPalette(int argc, const char **argv) {
 	}
 	delete[] data;
 	debugPrintf("Dump palette set from phase %08x\n", phaseId);
+	return true;
+}
+
+bool Console::cmdGoto(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: goto <phaseId>  (e.g. goto 0x102)\n");
+		return true;
+	}
+	uint32 phaseId = parseId(argv[1]);
+	if (g_engine->world().gotoPhase(phaseId))
+		debugPrintf("Now in phase %08x (%dx%d)\n", phaseId,
+			g_engine->world().phaseWidth(), g_engine->world().phaseHeight());
+	else
+		debugPrintf("Could not load phase %08x\n", phaseId);
+	return true;
+}
+
+bool Console::cmdScroll(int argc, const char **argv) {
+	World &world = g_engine->world();
+	if (argc < 3) {
+		debugPrintf("Scroll origin: (%d, %d); usage: scroll <x> <y>\n",
+			world.origin().x, world.origin().y);
+		return true;
+	}
+	world.origin().x = (int16)CLIP<int32>(atoi(argv[1]), 0, MAX(0, world.phaseWidth() - kScreenWidth));
+	world.origin().y = (int16)CLIP<int32>(atoi(argv[2]), 0, MAX(0, world.phaseHeight() - kScreenHeight));
+	debugPrintf("Scroll origin set to (%d, %d)\n", world.origin().x, world.origin().y);
+	return true;
+}
+
+bool Console::cmdScreenshot(int argc, const char **argv) {
+	Common::String fileName = (argc > 1) ? argv[1] : "gamebot-dumps/screenshot.bmp";
+
+	// Render a fresh frame and save it with the current system palette
+	g_engine->world().draw(g_engine->_screen);
+	byte palette[256 * 3];
+	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
+
+	Common::DumpFile out;
+	if (out.open(Common::Path(fileName), true) &&
+			Image::writeBMP(out, g_engine->_screen->rawSurface(), palette, 256))
+		debugPrintf("Wrote %s\n", fileName.c_str());
+	else
+		debugPrintf("Could not write %s\n", fileName.c_str());
 	return true;
 }
 

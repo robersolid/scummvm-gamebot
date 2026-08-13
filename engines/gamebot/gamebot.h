@@ -31,6 +31,7 @@
 
 #include "gamebot/detection.h"
 #include "gamebot/resource.h"
+#include "gamebot/world.h"
 
 namespace Gamebot {
 
@@ -54,6 +55,7 @@ private:
 	ResourceFile _resources;    // Resdata.res: graphics, sounds, phase data
 	ActionFile _actions;        // Actions.act: per-object action rules
 	WorldFile _initialWorld;    // default.def: world state for a new game
+	World _world;               // runtime world (current phase)
 
 	// Loads the data file indexes. Returns false if a mandatory file
 	// is missing or corrupt.
@@ -75,6 +77,7 @@ public:
 	ResourceFile &resources() { return _resources; }
 	ActionFile &actions() { return _actions; }
 	WorldFile &initialWorld() { return _initialWorld; }
+	World &world() { return _world; }
 
 	uint32 getRandomNumber(uint maxNum) {
 		return _randomSource.getRandomNumber(maxNum);

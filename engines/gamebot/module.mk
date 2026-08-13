@@ -5,7 +5,8 @@ MODULE_OBJS = \
 	console.o \
 	debug-names.o \
 	metaengine.o \
-	resource.o
+	resource.o \
+	world.o
 
 # This module can be built as a plugin
 ifeq ($(ENABLE_GAMEBOT), DYNAMIC_PLUGIN)

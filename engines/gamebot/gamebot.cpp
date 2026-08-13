@@ -80,14 +80,18 @@ Common::Error GamebotEngine::run() {
 	if (saveSlot != -1)
 		(void)loadGameState(saveSlot);
 
-	// Minimal event loop: a black screen that can be quit.
-	// The actual game loop arrives with the world and video subsystems.
+	// Show something real until the script system decides the phase:
+	// the chapter 1 map screen
+	if (!_world.currentPhaseId())
+		_world.gotoPhase(0x101);
+
 	Common::Event e;
 	Graphics::FrameLimiter limiter(g_system, 60);
 	while (!shouldQuit()) {
 		while (g_system->getEventManager()->pollEvent(e)) {
 		}
 
+		_world.draw(_screen);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();

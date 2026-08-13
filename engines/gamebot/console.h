@@ -41,6 +41,10 @@ private:
 	bool cmdDumpRes(int argc, const char **argv);
 	bool cmdDumpMap(int argc, const char **argv);
 	bool cmdPalette(int argc, const char **argv);
+	bool cmdGoto(int argc, const char **argv);
+	bool cmdScroll(int argc, const char **argv);
+	bool cmdScreenshot(int argc, const char **argv);
+	bool cmdOverlay(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
 	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,
