@@ -23,6 +23,7 @@
 #include "common/endian.h"
 #include "graphics/screen.h"
 
+#include "gamebot/character.h"
 #include "gamebot/gamebot.h"
 #include "gamebot/ui.h"
 
@@ -172,6 +173,127 @@ void VerbPalette::draw(Graphics::Screen *screen) const {
 	}
 }
 
+// Medallion resources of the ChangerMaster object (id 0x15): four
+// face images (Mortadelo, Filemon and their grayed variants) plus a
+// spin animation per direction
+static const uint32 kChangerObjectId = 0x15;
+static const uint32 kFaceMortadelo = 0x00150101;
+static const uint32 kFaceFilemon = 0x00150102;
+static const uint32 kSpinToFilemon = 0x00150501;
+static const uint32 kSpinToMortadelo = 0x00150502;
+
+ChangerBadge::~ChangerBadge() {
+	for (uint i = 0; i < 2; i++) {
+		delete[] _faces[i].pixels;
+		delete[] _spins[i].frames;
+	}
+}
+
+bool ChangerBadge::load() {
+	ResourceFile &res = g_engine->resources();
+	static const uint32 kFaceIds[2] = { kFaceMortadelo, kFaceFilemon };
+	static const uint32 kSpinIds[2] = { kSpinToMortadelo, kSpinToFilemon };
+
+	for (uint i = 0; i < 2; i++) {
+		const ResourceEntry *e = res.findByResId(kFaceIds[i]);
+		byte *data = e ? res.readBlob(*e) : nullptr;
+		if (!data)
+			return false;
+		_faces[i].pixels = new byte[kBadgeWidth * kBadgeHeight];
+		memcpy(_faces[i].pixels, data + 16, kBadgeWidth * kBadgeHeight);
+		delete[] data;
+
+		e = res.findByResId(kSpinIds[i]);
+		data = e ? res.readBlob(*e) : nullptr;
+		if (!data)
+			continue; // faces alone still work
+		Spin &spin = _spins[i];
+		spin.frameSize = kBadgeWidth * kBadgeHeight;
+		spin.imageCount = READ_LE_UINT32(data + 16);
+		uint32 sequenceCount = READ_LE_UINT32(data + 20);
+		spin.framePeriod = READ_LE_UINT32(data + 24) * 3; // original tick pacing
+		uint32 imageLocation = READ_LE_UINT32(data + 32);
+		spin.sequence.resize(sequenceCount);
+		for (uint32 s = 0; s < sequenceCount; s++)
+			spin.sequence[s] = READ_LE_UINT32(data + 36 + s * 12);
+		delete[] data;
+
+		spin.frames = new byte[spin.frameSize * spin.imageCount];
+		Common::File &file = res.file();
+		file.seek(imageLocation);
+		if (file.read(spin.frames, spin.frameSize * spin.imageCount) !=
+				spin.frameSize * spin.imageCount) {
+			delete[] spin.frames;
+			spin.frames = nullptr;
+		}
+	}
+	_loaded = true;
+	return true;
+}
+
+int16 ChangerBadge::badgeX() const {
+	return kScreenWidth - kBadgeWidth;
+}
+
+bool ChangerBadge::handleClick(const Common::Point &screenPos) {
+	if (!_loaded || _spinning || !g_engine->secondCharacter())
+		return false;
+	int localX = screenPos.x - badgeX(), localY = screenPos.y;
+	if (localX < 0 || localX >= kBadgeWidth || localY < 0 || localY >= kBadgeHeight)
+		return false;
+
+	uint facing = (g_engine->master().objectId() == kCharMortadelo) ? 1 : 0;
+	if (_faces[facing].pixels[localY * kBadgeWidth + localX] == kTransparentColor)
+		return false;
+
+	// Spin toward the other character, then hand over control
+	_spinIndex = facing;
+	if (_spins[_spinIndex].frames) {
+		_spinning = true;
+		_spinStep = 0;
+		_spinTime = 0;
+	} else {
+		g_engine->switchMaster();
+	}
+	return true;
+}
+
+void ChangerBadge::update(uint32 millis) {
+	if (!_spinning)
+		return;
+	Spin &spin = _spins[_spinIndex];
+	if (!_spinTime)
+		_spinTime = millis + spin.framePeriod;
+	while (millis >= _spinTime && _spinning) {
+		_spinTime += spin.framePeriod ? spin.framePeriod : 15;
+		_spinStep++;
+		if (_spinStep >= spin.sequence.size() ||
+				spin.sequence[_spinStep] >= SequenceStep::kAutoDisable) {
+			_spinning = false;
+			g_engine->switchMaster();
+		}
+	}
+}
+
+void ChangerBadge::draw(Graphics::Screen *screen) {
+	if (!_loaded || !g_engine->secondCharacter())
+		return;
+
+	const byte *pixels;
+	if (_spinning) {
+		Spin &spin = _spins[_spinIndex];
+		uint32 imageIndex = spin.sequence.empty() ? 1 : spin.sequence[_spinStep];
+		if (imageIndex < 1 || imageIndex > spin.imageCount)
+			imageIndex = 1;
+		pixels = spin.frames + (imageIndex - 1) * spin.frameSize;
+	} else {
+		// The badge shows the partner you would switch to
+		uint facing = (g_engine->master().objectId() == kCharMortadelo) ? 1 : 0;
+		pixels = _faces[facing].pixels;
+	}
+	blitImage(screen, pixels, badgeX(), 0, kBadgeWidth, kBadgeHeight);
+}
+
 InventoryUI::~InventoryUI() {
 	delete[] _safeImage.pixels;
 	for (auto &entry : _itemCache) {
@@ -274,6 +396,15 @@ uint32 InventoryUI::handleClick(const Common::Point &screenPos) {
 	if (slot >= 0 && slot < (int)items.size())
 		return items[slot];
 	return 0;
+}
+
+const byte *InventoryUI::itemCursor(uint32 objectId, int16 &width, int16 &height) {
+	const ItemImages *images = itemImages(objectId);
+	if (!images)
+		return nullptr;
+	width = images->rect.width();
+	height = images->rect.height();
+	return images->normal;
 }
 
 void InventoryUI::draw(Graphics::Screen *screen) {

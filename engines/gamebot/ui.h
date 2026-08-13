@@ -72,6 +72,45 @@ private:
 	int _hover = -1;
 };
 
+// The medallion of the original ChangerMaster: a badge at the top
+// right showing the partner agent; clicking it spins the badge and
+// hands control to the other character.
+class ChangerBadge {
+public:
+	~ChangerBadge();
+
+	bool load();
+	// True when the click hit the badge (and the spin started)
+	bool handleClick(const Common::Point &screenPos);
+	void update(uint32 millis);
+	void draw(Graphics::Screen *screen);
+
+	static const int16 kBadgeWidth = 80, kBadgeHeight = 78;
+
+private:
+	struct Face {
+		byte *pixels = nullptr; // kBadgeWidth * kBadgeHeight
+	};
+	struct Spin {
+		byte *frames = nullptr;
+		uint32 frameSize = 0;
+		uint32 imageCount = 0;
+		uint32 framePeriod = 0;
+		Common::Array<uint32> sequence;
+	};
+
+	int16 badgeX() const; // badge lives at the top-right corner
+
+	Face _faces[2];  // 0 = Mortadelo, 1 = Filemon
+	Spin _spins[2];
+	bool _loaded = false;
+
+	bool _spinning = false;
+	uint _spinIndex = 0;
+	uint32 _spinStep = 0;
+	uint32 _spinTime = 0;
+};
+
 // The inventory of this game is an open safe: right click shows it
 // with the collected objects laid out in a grid; clicking one selects
 // it for a use-with interaction.
@@ -88,6 +127,9 @@ public:
 	// Returns the picked object id, or 0 when nothing was hit
 	uint32 handleClick(const Common::Point &screenPos);
 	void draw(Graphics::Screen *screen);
+
+	// Inventory image of an item, for the object-as-cursor swap
+	const byte *itemCursor(uint32 objectId, int16 &width, int16 &height);
 
 private:
 	struct ItemImages {

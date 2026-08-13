@@ -388,6 +388,8 @@ bool Console::cmdWait(int argc, const char **argv) {
 		g_engine->world().draw(g_engine->_screen, &g_engine->master(), g_engine->secondCharacter());
 		g_engine->logic().writer().draw(g_engine->_screen);
 		g_engine->logic().drawDialog(g_engine->_screen);
+		g_engine->changerBadge().update(millis);
+		g_engine->changerBadge().draw(g_engine->_screen);
 		g_engine->verbPalette().draw(g_engine->_screen);
 		g_engine->inventoryUI().draw(g_engine->_screen);
 		g_engine->_screen->update();
@@ -816,6 +818,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	g_engine->world().draw(g_engine->_screen, &g_engine->master(), g_engine->secondCharacter());
 	g_engine->logic().writer().draw(g_engine->_screen);
 	g_engine->logic().drawDialog(g_engine->_screen);
+	g_engine->changerBadge().draw(g_engine->_screen);
 	g_engine->verbPalette().draw(g_engine->_screen);
 	g_engine->inventoryUI().draw(g_engine->_screen);
 	byte palette[256 * 3];

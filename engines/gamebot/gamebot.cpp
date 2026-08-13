@@ -101,10 +101,27 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 		debugC(kDebugEvents, "Hovering %08x '%s'", hit.objectId, hit.name.c_str());
 	_hoverObjectId = hovering ? hit.objectId : 0;
 
-	if (hovering != _hotCursorShown) {
+	// While an object hangs from the cursor its image stays put
+	if (!_linkedObject && hovering != _hotCursorShown) {
 		setCursor(hovering ? _hotCursor : _standardCursor);
 		_hotCursorShown = hovering;
 	}
+}
+
+// Swaps the mouse cursor for the linked object's inventory image
+// (the original MouseSys object-linking), or restores the cursor
+void GamebotEngine::linkObject(uint32 objectId) {
+	_linkedObject = objectId;
+	if (!objectId) {
+		setCursor(_standardCursor);
+		_hotCursorShown = false;
+		return;
+	}
+	int16 width = 0, height = 0;
+	const byte *pixels = _inventoryUI.itemCursor(objectId, width, height);
+	if (pixels)
+		CursorMan.replaceCursor(pixels, width, height, width / 2, height / 2, 0);
+	debugC(kDebugEvents, "Item %08x linked to the cursor", objectId);
 }
 
 void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
@@ -112,16 +129,18 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_logic.handleDialogClick(screenPos))
 		return;
 
-	// The inventory: picking an item selects it for a use-with
+	// The inventory: picking an item hangs it from the cursor; the
+	// inventory stays open and right click closes it
 	if (_inventoryUI.isOpen()) {
 		uint32 item = _inventoryUI.handleClick(screenPos);
-		if (item) {
-			_linkedObject = item;
-			_inventoryUI.close();
-			debugC(kDebugEvents, "Item %08x selected for use", item);
-		}
+		if (item)
+			linkObject(item);
 		return;
 	}
+
+	// The medallion switches control to the partner agent
+	if (_changerBadge.handleClick(screenPos))
+		return;
 
 	// An open verb palette resolves the click into a verb
 	if (_verbPalette.isOpen()) {
@@ -137,7 +156,8 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (!_world.hitTest(phasePos, hit)) {
 		// Clicking the floor walks there
 		debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
-		_linkedObject = 0;
+		if (_linkedObject)
+			linkObject(0);
 		master().walkTo(_world, phasePos);
 		return;
 	}
@@ -154,7 +174,7 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_linkedObject) {
 		// Use the selected inventory object on the clicked one
 		uint32 item = _linkedObject;
-		_linkedObject = 0;
+		linkObject(0);
 		_logic.interactWith(hit.objectId, kVerbUse, item);
 		return;
 	}
@@ -330,6 +350,7 @@ Common::Error GamebotEngine::run() {
 	_mortadelo.load(kCharMortadelo);
 	_filemon.load(kCharFilemon);
 	_both.load(kCharBoth);
+	_changerBadge.load();
 
 	// Development aid: run semicolon-separated console commands from
 	// the config file, e.g. gamebot_exec=phases;dumpmap 0x0101
@@ -397,6 +418,7 @@ Common::Error GamebotEngine::run() {
 		_mortadelo.tick(millis, _world);
 		_filemon.tick(millis, _world);
 		_both.tick(millis, _world);
+		_changerBadge.update(millis);
 		_logic.update(millis);
 
 		// Camera follows the master character on wide phases,
@@ -414,6 +436,7 @@ Common::Error GamebotEngine::run() {
 		_world.draw(_screen, &master(), secondCharacter());
 		_logic.writer().draw(_screen);
 		_logic.drawDialog(_screen);
+		_changerBadge.draw(_screen);
 		_verbPalette.draw(_screen);
 		_inventoryUI.draw(_screen);
 		limiter.delayBeforeSwap();

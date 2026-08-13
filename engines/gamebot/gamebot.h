@@ -69,6 +69,7 @@ private:
 	Logic _logic;               // action rules, inventory, phrases
 	VerbPalette _verbPalette;   // pop-up verb selection
 	InventoryUI _inventoryUI;   // the safe with the collected objects
+	ChangerBadge _changerBadge; // the character-switch medallion
 	SoundManager _sounds;       // ADPCM voices, effects and music
 	uint32 _linkedObject = 0;   // inventory object selected for use-with
 
@@ -126,7 +127,12 @@ public:
 	Logic &logic() { return _logic; }
 	VerbPalette &verbPalette() { return _verbPalette; }
 	InventoryUI &inventoryUI() { return _inventoryUI; }
+	ChangerBadge &changerBadge() { return _changerBadge; }
 	SoundManager &sounds() { return _sounds; }
+	// Selects an inventory object for use-with, swapping the cursor
+	// for its image; 0 restores the standard cursor
+	void linkObject(uint32 objectId);
+	uint32 linkedObject() const { return _linkedObject; }
 
 	// Loads a phase and places the characters at its entry positions
 	bool gotoPhase(uint32 phaseId);
