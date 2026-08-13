@@ -23,6 +23,7 @@
 #define GAMEBOT_LOGIC_H
 
 #include "common/hashmap.h"
+#include "common/serializer.h"
 #include "common/str.h"
 
 #include "gamebot/resource.h"
@@ -133,6 +134,16 @@ public:
 	void addToInventory(uint32 objectId);
 	const Common::HashMap<uint32, bool> &inventory() const { return _inventory; }
 
+	// Persistent object state: rules enable and disable objects and
+	// the change must survive leaving and re-entering the phase
+	void setObjectEnabled(uint32 objectId, bool enabled);
+	// Applies the accumulated overrides to a freshly loaded phase
+	void applyObjectStates();
+
+	// Full game state serialization (phase, character, inventory,
+	// object overrides and dialog sentence states)
+	void syncGame(Common::Serializer &s);
+
 	TextWriter &writer() { return _writer; }
 
 	// Shows a phrase spoken by the master character: text on screen,
@@ -168,6 +179,7 @@ private:
 	void endDialog();
 
 	Common::HashMap<uint32, bool> _inventory;
+	Common::HashMap<uint32, bool> _objectEnabled; // overrides vs default.def
 	TextWriter _writer;
 	uint32 _phraseSound = 0; // voice code of the phrase on screen
 

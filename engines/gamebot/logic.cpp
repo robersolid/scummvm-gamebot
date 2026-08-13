@@ -96,8 +96,87 @@ void TextWriter::draw(Graphics::Screen *screen) const {
 
 void Logic::addToInventory(uint32 objectId) {
 	_inventory[objectId] = true;
-	g_engine->world().setEnabled(objectId, false);
+	setObjectEnabled(objectId, false);
 	debugC(kDebugActions, "Object %08x added to the inventory", objectId);
+}
+
+void Logic::setObjectEnabled(uint32 objectId, bool enabled) {
+	_objectEnabled[objectId] = enabled;
+	g_engine->world().setEnabled(objectId, enabled);
+}
+
+void Logic::applyObjectStates() {
+	for (auto &entry : _objectEnabled)
+		g_engine->world().setEnabled(entry._key, entry._value);
+}
+
+void Logic::syncGame(Common::Serializer &s) {
+	// Inventory
+	uint32 count = _inventory.size();
+	s.syncAsUint32LE(count);
+	if (s.isLoading()) {
+		_inventory.clear();
+		for (uint32 i = 0; i < count; i++) {
+			uint32 id = 0;
+			s.syncAsUint32LE(id);
+			_inventory[id] = true;
+		}
+	} else {
+		for (auto &entry : _inventory) {
+			uint32 id = entry._key;
+			s.syncAsUint32LE(id);
+		}
+	}
+
+	// Object enabled overrides
+	count = _objectEnabled.size();
+	s.syncAsUint32LE(count);
+	if (s.isLoading()) {
+		_objectEnabled.clear();
+		for (uint32 i = 0; i < count; i++) {
+			uint32 id = 0;
+			byte enabled = 0;
+			s.syncAsUint32LE(id);
+			s.syncAsByte(enabled);
+			_objectEnabled[id] = enabled != 0;
+		}
+	} else {
+		for (auto &entry : _objectEnabled) {
+			uint32 id = entry._key;
+			byte enabled = entry._value ? 1 : 0;
+			s.syncAsUint32LE(id);
+			s.syncAsByte(enabled);
+		}
+	}
+
+	// Dialog sentence states (only dialogs that have been touched)
+	count = _dialogs.size();
+	s.syncAsUint32LE(count);
+	if (s.isLoading()) {
+		_dialogs.clear();
+		for (uint32 i = 0; i < count; i++) {
+			uint32 dialogId = 0;
+			s.syncAsUint32LE(dialogId);
+			loadDialog(dialogId);
+			uint32 sentenceCount = 0;
+			s.syncAsUint32LE(sentenceCount);
+			for (uint32 j = 0; j < sentenceCount; j++) {
+				uint32 flags = 0;
+				s.syncAsUint32LE(flags);
+				if (_dialogs.contains(dialogId) && j < _dialogs[dialogId].size())
+					_dialogs[dialogId][j].flags = flags;
+			}
+		}
+	} else {
+		for (auto &entry : _dialogs) {
+			uint32 dialogId = entry._key;
+			s.syncAsUint32LE(dialogId);
+			uint32 sentenceCount = entry._value.size();
+			s.syncAsUint32LE(sentenceCount);
+			for (uint32 j = 0; j < sentenceCount; j++)
+				s.syncAsUint32LE(entry._value[j].flags);
+		}
+	}
 }
 
 static uint32 verbEvent(Verb verb) {
@@ -327,10 +406,10 @@ void Logic::runAction(const ActionRule &rule) {
 		break;
 	}
 	case kActionEnable:
-		g_engine->world().setEnabled(rule.actionParam1, true);
+		setObjectEnabled(rule.actionParam1, true);
 		break;
 	case kActionDisable:
-		g_engine->world().setEnabled(rule.actionParam1, false);
+		setObjectEnabled(rule.actionParam1, false);
 		break;
 	case kActionPhraseOn:
 		sayPhrase(rule.actionParam1, rule.actionParam2);
@@ -352,10 +431,10 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 		addToInventory(param2);
 		break;
 	case kEventObjDisable:
-		g_engine->world().setEnabled(param2, false);
+		setObjectEnabled(param2, false);
 		break;
 	case kEventObjEnable:
-		g_engine->world().setEnabled(param2, true);
+		setObjectEnabled(param2, true);
 		break;
 	case kEventObjActivateAnim: {
 		const ResourceEntry *e = g_engine->resources().findByResId(param2);

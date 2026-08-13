@@ -235,6 +235,9 @@ bool GamebotEngine::gotoPhase(uint32 phaseId) {
 	if (!_world.gotoPhase(phaseId))
 		return false;
 
+	// Rule-driven object changes persist across phase loads
+	_logic.applyObjectStates();
+
 	// Place the characters at the phase entry location
 	int phaseIndex = _initialWorld.findPhase(phaseId);
 	if (phaseIndex >= 0 && _mortadelo.isLoaded()) {
@@ -370,11 +373,36 @@ Common::Error GamebotEngine::run() {
 }
 
 Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
-	// Savegame layout is defined in a later milestone; version the
-	// stream from the very first save to stay forward compatible.
 	if (!s.syncVersion(1))
 		return Common::kUnknownError;
 
+	uint32 phaseId = _world.currentPhaseId();
+	int16 x = _mortadelo.x(), y = _mortadelo.y();
+	uint16 orient = _mortadelo.orientation(), layer = _mortadelo.layer();
+	s.syncAsUint32LE(phaseId);
+	s.syncAsSint16LE(x);
+	s.syncAsSint16LE(y);
+	s.syncAsUint16LE(orient);
+	s.syncAsUint16LE(layer);
+
+	_logic.syncGame(s);
+
+	if (s.isLoading()) {
+		if (!_world.gotoPhase(phaseId))
+			return Common::kUnknownError;
+		_logic.applyObjectStates();
+		CharacterLocation location;
+		location.characterId = _mortadelo.objectId();
+		location.x = x;
+		location.y = y;
+		location.orientation = orient;
+		location.layer = layer;
+		_mortadelo.enterPhase(_world, location);
+		_mortadelo.visible = true;
+		debugC(kDebugSaves, "Game loaded: phase %08x, character at (%d,%d)", phaseId, x, y);
+	} else {
+		debugC(kDebugSaves, "Game saved: phase %08x, character at (%d,%d)", phaseId, x, y);
+	}
 	return Common::kNoError;
 }
 

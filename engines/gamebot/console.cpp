@@ -93,6 +93,22 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("dumpsound", WRAP_METHOD(Console, cmdDumpSound));
 	registerCmd("playflic", WRAP_METHOD(Console, cmdPlayFlic));
 	registerCmd("dumpflic", WRAP_METHOD(Console, cmdDumpFlic));
+	registerCmd("saveslot", WRAP_METHOD(Console, cmdSaveSlot));
+	registerCmd("loadslot", WRAP_METHOD(Console, cmdSaveSlot));
+}
+
+bool Console::cmdSaveSlot(int argc, const char **argv) {
+	if (argc < 2) {
+		debugPrintf("Usage: %s <slot>\n", argv[0]);
+		return true;
+	}
+	int slot = atoi(argv[1]);
+	Common::Error result = !strcmp(argv[0], "saveslot")
+		? g_engine->saveGameState(slot, "debug save")
+		: g_engine->loadGameState(slot);
+	debugPrintf("%s slot %d: %s\n", argv[0], slot,
+		result.getCode() == Common::kNoError ? "ok" : result.getDesc().c_str());
+	return true;
 }
 
 bool Console::cmdPlayFlic(int argc, const char **argv) {
