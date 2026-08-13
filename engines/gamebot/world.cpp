@@ -84,8 +84,10 @@ bool World::loadPhaseInit(uint32 phaseId) {
 	applyPalette();
 
 	_musicCode = READ_LE_UINT32(data + 8);
+	_fxCode = READ_LE_UINT32(data + 12);
 	debugC(kDebugResources, "Phase %08x: %dx%d, music %x, fx %x", phaseId,
-		_phaseWidth, _phaseHeight, _musicCode, READ_LE_UINT32(data + 12));
+		_phaseWidth, _phaseHeight, _musicCode, _fxCode);
+	initWeather();
 	if (_musicCode)
 		g_engine->sounds().playMusic(_musicCode);
 	else
@@ -96,6 +98,110 @@ bool World::loadPhaseInit(uint32 phaseId) {
 
 void World::applyPalette() const {
 	g_system->getPaletteManager()->setPalette(_palette, 0, 256);
+}
+
+// Weather constants of the original FXMaster
+enum {
+	kFxSnow = 1,
+	kFxRain = 2,
+	kSnowColor = 19,        // palette entries chosen by the artists
+	kRainColor = 17,
+	kBigFlake = 7,
+	kSmallFlake = 5,
+	kRainDrop = 17,
+	kFxItemCount = 100,
+	kFxTickMs = 75,
+	kFxRandomSeed = 23637
+};
+
+// A snow flake is a rounded square: the corner rows are inset
+static void drawFlake(byte *buffer, uint32 origin, byte color, uint32 size) {
+	uint32 end = size;
+	if (end + origin / kScreenWidth > kScreenHeight)
+		end = kScreenHeight - origin / kScreenWidth;
+	for (uint32 i = 0; i < end; i++) {
+		uint32 inset = 0;
+		if (i == 0 || i == size - 1)
+			inset = 1 + (size == kBigFlake);
+		if (i == 1 || i == size - 2)
+			inset = (size == kBigFlake) ? 1 : 0;
+		for (uint32 j = inset; j < size - inset; j++)
+			buffer[origin + kScreenWidth * i + j] = color;
+	}
+}
+
+// A rain drop is a slightly slanted dashed streak
+static void drawDrop(byte *buffer, uint32 origin, byte color, uint32 size) {
+	if (size + origin / kScreenWidth > kScreenHeight)
+		size = kScreenHeight - origin / kScreenWidth;
+	for (uint32 i = 0, j = 0; i < size; i++) {
+		if (i == 4 || i == 8 || i == 12 || i == 16)
+			j++;
+		if (i != 1 && i != 3)
+			buffer[origin + kScreenWidth * i + j] = color;
+	}
+}
+
+void World::initWeather() {
+	_fxNextTick = 0;
+	if (!_fxCode) {
+		_fxBuffer.clear();
+		_fxItems.clear();
+		return;
+	}
+	_fxBuffer.resize(kScreenWidth * kScreenHeight);
+	memset(_fxBuffer.data(), kTransparentColor, _fxBuffer.size());
+
+	// Deterministic initial spread, as seeded in the original
+	_fxItems.resize(kFxItemCount);
+	uint32 random = kFxRandomSeed;
+	for (uint i = 0; i < kFxItemCount; i++) {
+		_fxItems[i] = random;
+		random += 13;
+		random = (random * 37) % (kScreenWidth * kScreenHeight - kBigFlake);
+	}
+}
+
+void World::updateWeather(uint32 millis) {
+	if (!_fxCode || _fxBuffer.empty())
+		return;
+	if (!_fxNextTick)
+		_fxNextTick = millis + kFxTickMs;
+	byte *buffer = _fxBuffer.data();
+
+	while (millis >= _fxNextTick) {
+		_fxNextTick += kFxTickMs;
+		if (_fxCode == kFxSnow) {
+			// Big flakes fall four rows per tick, small ones two,
+			// both with a small horizontal jitter
+			for (int i = kFxItemCount - 1; i >= kFxItemCount / 2; i--) {
+				drawFlake(buffer, _fxItems[i], kTransparentColor, kBigFlake);
+				_fxItems[i] = (_fxItems[i] + kScreenWidth * 4 +
+					g_engine->getRandomNumber(3) - g_engine->getRandomNumber(3)) %
+					(kScreenWidth * kScreenHeight - kBigFlake);
+				drawFlake(buffer, _fxItems[i], kSnowColor, kBigFlake);
+			}
+			for (int i = kFxItemCount / 2 - 1; i >= 0; i--) {
+				drawFlake(buffer, _fxItems[i], kTransparentColor, kSmallFlake);
+				_fxItems[i] = (_fxItems[i] + kScreenWidth * 2 +
+					g_engine->getRandomNumber(3) - g_engine->getRandomNumber(3)) %
+					(kScreenWidth * kScreenHeight - kSmallFlake);
+				drawFlake(buffer, _fxItems[i], kSnowColor, kSmallFlake);
+			}
+		} else if (_fxCode == kFxRain) {
+			// Drops fall 25 rows and drift 4 pixels per tick. The
+			// original loop also read one item past the table; that
+			// overrun is not reproduced.
+			for (int i = kFxItemCount - 1; i >= 0; i--) {
+				drawDrop(buffer, _fxItems[i], kTransparentColor, kRainDrop);
+				_fxItems[i] = (_fxItems[i] + kScreenWidth * 25) %
+					(kScreenWidth * kScreenHeight) + 4;
+				if (_fxItems[i] + kScreenWidth * kRainDrop >= kScreenWidth * kScreenHeight)
+					_fxItems[i] %= kScreenWidth;
+				drawDrop(buffer, _fxItems[i], kRainColor, kRainDrop);
+			}
+		}
+	}
 }
 
 void World::loadWalkMap(uint32 phaseId) {
@@ -380,6 +486,7 @@ void World::update(uint32 millis) {
 		if (!_items[i].anims.empty() && _items[i].visible)
 			updateItem(_items[i], millis);
 	}
+	updateWeather(millis);
 }
 
 bool World::isEnabled(uint32 objectId) const {
@@ -516,6 +623,19 @@ void World::draw(Graphics::Screen *screen, const Character *actor,
 	for (uint a = 0; a < 2; a++) {
 		if (!drawn[a])
 			actors[a]->draw(screen, _origin);
+	}
+
+	// Weather falls over the whole scene, in screen space
+	if (_fxCode && !_fxBuffer.empty()) {
+		const byte *fx = _fxBuffer.data();
+		for (int y = 0; y < screen->h; y++) {
+			byte *dst = (byte *)screen->getBasePtr(0, y);
+			const byte *src = fx + y * kScreenWidth;
+			for (int x = 0; x < screen->w; x++) {
+				if (src[x] != kTransparentColor)
+					dst[x] = src[x];
+			}
+		}
 	}
 
 	if (_showWalkMap)

@@ -175,6 +175,15 @@ private:
 	byte _palette[256 * 3] = {};
 	uint32 _musicCode = 0;
 
+	// Ambient weather overlay (original FXMaster: snow and rain
+	// particles over the scene in screen space)
+	uint32 _fxCode = 0;
+	Common::Array<byte> _fxBuffer;   // screen-sized, color 0 clear
+	Common::Array<uint32> _fxItems;  // particle positions (linear)
+	uint32 _fxNextTick = 0;
+	void initWeather();
+	void updateWeather(uint32 millis);
+
 	Common::Array<DrawItem> _items; // in back-to-front draw order
 	Common::Array<Hotspot> _hotspots;
 
