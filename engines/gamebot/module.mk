@@ -3,7 +3,9 @@ MODULE := engines/gamebot
 MODULE_OBJS = \
 	gamebot.o \
 	console.o \
-	metaengine.o
+	debug-names.o \
+	metaengine.o \
+	resource.o
 
 # This module can be built as a plugin
 ifeq ($(ENABLE_GAMEBOT), DYNAMIC_PLUGIN)

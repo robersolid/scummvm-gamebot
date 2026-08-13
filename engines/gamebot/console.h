@@ -26,13 +26,33 @@
 
 namespace Gamebot {
 
+struct ResourceEntry;
+
 class Console : public GUI::Debugger {
 private:
+	// Palette used when dumping images as BMP, selectable per phase
+	byte _dumpPalette[256 * 3];
+
 	bool cmdDataFiles(int argc, const char **argv);
+	bool cmdResInfo(int argc, const char **argv);
+	bool cmdPhases(int argc, const char **argv);
+	bool cmdObjects(int argc, const char **argv);
+	bool cmdActions(int argc, const char **argv);
+	bool cmdDumpRes(int argc, const char **argv);
+	bool cmdDumpMap(int argc, const char **argv);
+	bool cmdPalette(int argc, const char **argv);
+
+	uint dumpImageBlob(const ResourceEntry &e, const byte *data);
+	bool dumpSurface(const byte *pixels, uint16 width, uint16 height,
+		const Common::String &fileName);
 
 public:
 	Console();
 	~Console() override {}
+
+	// Runs a console command programmatically; used by the gamebot_exec
+	// config key to script debug commands from the command line
+	bool executeCommand(const Common::String &command);
 };
 
 } // End of namespace Gamebot

@@ -23,6 +23,7 @@
 #include "common/debug.h"
 #include "common/events.h"
 #include "common/file.h"
+#include "common/tokenizer.h"
 #include "engines/util.h"
 #include "graphics/framelimiter.h"
 
@@ -50,52 +51,29 @@ Common::String GamebotEngine::getGameId() const {
 	return _gameDescription->gameId;
 }
 
-bool GamebotEngine::verifyDataFiles() {
-	// All GameBot data files share the same 8-byte header layout
-	// (see BotFile.h in the original sources): a 4-char signature
-	// followed by a version dword, then per-format counters.
-	struct FileCheck {
-		const char *name;
-		const char *signature;
-		bool mandatory;
-	};
-	static const FileCheck checks[] = {
-		{ GAMEBOT_RESOURCE_FILE, "WZRS", true },
-		{ GAMEBOT_ACTIONS_FILE, "WZAC", true },
-		{ GAMEBOT_NEWGAME_FILE, "WZOB", true },
-		{ GAMEBOT_NEWGAME_DIALOG_FILE, "WZRS", false },
-	};
-
-	for (const FileCheck &check : checks) {
-		Common::File file;
-		if (!file.open(check.name)) {
-			if (!check.mandatory)
-				continue;
-			warning("Could not open data file %s", check.name);
-			return false;
-		}
-
-		char signature[4];
-		if (file.read(signature, 4) != 4 || memcmp(signature, check.signature, 4) != 0) {
-			warning("Data file %s has an invalid signature", check.name);
-			return false;
-		}
-
-		uint32 version = file.readUint32LE();
-		uint32 count = file.readUint32LE();
-		debugC(kDebugResources, "%s: version 0x%08x, %u entries", check.name, version, count);
-	}
-	return true;
+bool GamebotEngine::loadDataFiles() {
+	return _resources.load(GAMEBOT_RESOURCE_FILE) &&
+		_actions.load(GAMEBOT_ACTIONS_FILE) &&
+		_initialWorld.load(GAMEBOT_NEWGAME_FILE);
 }
 
 Common::Error GamebotEngine::run() {
 	initGraphics(kScreenWidth, kScreenHeight);
 	_screen = new Graphics::Screen();
 
-	setDebugger(new Console());
+	Console *console = new Console();
+	setDebugger(console);
 
-	if (!verifyDataFiles())
+	if (!loadDataFiles())
 		return Common::kNoGameDataFoundError;
+
+	// Development aid: run semicolon-separated console commands from
+	// the config file, e.g. gamebot_exec=phases;dumpmap 0x0101
+	if (ConfMan.hasKey("gamebot_exec")) {
+		Common::StringTokenizer commands(ConfMan.get("gamebot_exec"), ";");
+		while (!commands.empty())
+			console->executeCommand(commands.nextToken());
+	}
 
 	// If a savegame was selected from the launcher, load it
 	int saveSlot = ConfMan.getInt("save_slot");

@@ -30,6 +30,7 @@
 #include "graphics/screen.h"
 
 #include "gamebot/detection.h"
+#include "gamebot/resource.h"
 
 namespace Gamebot {
 
@@ -50,9 +51,13 @@ private:
 	const ADGameDescription *_gameDescription;
 	Common::RandomSource _randomSource;
 
-	// Reads the data file headers and logs their contents.
-	// Returns false if a mandatory file is missing or corrupt.
-	bool verifyDataFiles();
+	ResourceFile _resources;    // Resdata.res: graphics, sounds, phase data
+	ActionFile _actions;        // Actions.act: per-object action rules
+	WorldFile _initialWorld;    // default.def: world state for a new game
+
+	// Loads the data file indexes. Returns false if a mandatory file
+	// is missing or corrupt.
+	bool loadDataFiles();
 
 protected:
 	// Engine APIs
@@ -66,6 +71,10 @@ public:
 
 	uint32 getFeatures() const;
 	Common::String getGameId() const;
+
+	ResourceFile &resources() { return _resources; }
+	ActionFile &actions() { return _actions; }
+	WorldFile &initialWorld() { return _initialWorld; }
 
 	uint32 getRandomNumber(uint maxNum) {
 		return _randomSource.getRandomNumber(maxNum);
