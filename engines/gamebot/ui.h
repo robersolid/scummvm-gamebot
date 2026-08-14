@@ -64,9 +64,17 @@ private:
 
 	int hitIcon(const Common::Point &screenPos) const;
 
-	Image _background;
-	Image _icons[4];
-	uint32 _actionCodes[4] = {};
+	// One palette design per playable character, as the original
+	// swaps the select image on every master change
+	struct Set {
+		Image background;
+		Image icons[4];
+		uint32 actionCodes[4] = {};
+	};
+	bool loadSet(uint32 resId, Set &set);
+	const Set &activeSet() const;
+
+	Set _sets[2]; // Mortadelo, Filemon
 	bool _loaded = false;
 	bool _open = false;
 	Common::Point _pos;         // top-left of the palette on screen

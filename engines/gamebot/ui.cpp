@@ -36,8 +36,9 @@ namespace Gamebot {
 
 static const byte kTransparentColor = 0;
 
-// Verb palette resource of Mortadelo (original ResSelectMortaNormal)
+// Verb palette resources (original ResSelectMortaNormal/FileNormal)
 static const uint32 kPaletteResId = 0x00031001;
+static const uint32 kPaletteResIdFilemon = 0x00031002;
 // Mouse mode action codes carried by the palette icons
 enum {
 	kModePickup = 0x00010000,
@@ -62,23 +63,21 @@ static void blitImage(Graphics::Screen *screen, const byte *pixels,
 }
 
 VerbPalette::~VerbPalette() {
-	delete[] _background.pixels;
-	for (uint i = 0; i < 4; i++)
-		delete[] _icons[i].pixels;
+	for (uint s = 0; s < 2; s++) {
+		delete[] _sets[s].background.pixels;
+		for (uint i = 0; i < 4; i++)
+			delete[] _sets[s].icons[i].pixels;
+	}
 }
 
 // Layout of a select-image blob: 5 rects, 4 action codes, then the
 // pixel data of every rect whose bottom coordinate is not zero. The
 // first rect/image is the palette background, the rest are the icons.
-bool VerbPalette::load() {
+bool VerbPalette::loadSet(uint32 resId, Set &set) {
 	ResourceFile &res = g_engine->resources();
-	const ResourceEntry *e = res.findByResId(kPaletteResId);
+	const ResourceEntry *e = res.findByResId(resId);
 	if (!e)
-		e = res.findResource(3 /* MouseSys */, kResSelectImage);
-	if (!e) {
-		warning("Verb palette resource not found");
 		return false;
-	}
 
 	byte *data = res.readBlob(*e);
 	if (!data)
@@ -92,14 +91,14 @@ bool VerbPalette::load() {
 			READ_LE_INT32(p + 8) + 1, READ_LE_INT32(p + 12) + 1);
 	}
 	for (uint i = 0; i < 4; i++)
-		_actionCodes[i] = READ_LE_UINT32(data + 5 * 16 + i * 4);
+		set.actionCodes[i] = READ_LE_UINT32(data + 5 * 16 + i * 4);
 
 	uint32 pos = 5 * 16 + 4 * 4;
 	for (uint i = 0; i < 5; i++) {
 		// Presence marker: a zero bottom coordinate means no image
 		if (READ_LE_INT32(data + i * 16 + 12) == 0)
 			continue;
-		Image &image = (i == 0) ? _background : _icons[i - 1];
+		Image &image = (i == 0) ? set.background : set.icons[i - 1];
 		image.rect = rects[i];
 		uint32 size = rects[i].width() * rects[i].height();
 		image.pixels = new byte[size];
@@ -107,35 +106,53 @@ bool VerbPalette::load() {
 		pos += size;
 	}
 	delete[] data;
+	return set.background.pixels != nullptr;
+}
 
-	_loaded = _background.pixels != nullptr;
-	debugC(kDebugResources, "Verb palette loaded (%dx%d)",
-		_background.rect.width(), _background.rect.height());
-	return _loaded;
+// The palette design of the character under control (the original
+// posts evMouseActionPalette with the master's select image)
+const VerbPalette::Set &VerbPalette::activeSet() const {
+	if (_sets[1].background.pixels &&
+			g_engine->master().objectId() != kCharMortadelo)
+		return _sets[1];
+	return _sets[0];
+}
+
+bool VerbPalette::load() {
+	if (!loadSet(kPaletteResId, _sets[0])) {
+		warning("Verb palette resource not found");
+		return false;
+	}
+	loadSet(kPaletteResIdFilemon, _sets[1]);
+	_loaded = true;
+	debugC(kDebugResources, "Verb palettes loaded (%dx%d)",
+		_sets[0].background.rect.width(), _sets[0].background.rect.height());
+	return true;
 }
 
 void VerbPalette::open(const Common::Point &screenPos, uint32 objectId) {
 	if (!_loaded && !load())
 		return;
 	_objectId = objectId;
-	_pos.x = CLIP<int16>(screenPos.x - _background.rect.width() / 2,
-		0, kScreenWidth - _background.rect.width());
-	_pos.y = CLIP<int16>(screenPos.y - _background.rect.height() / 2,
-		0, kScreenHeight - _background.rect.height());
+	_pos.x = CLIP<int16>(screenPos.x - activeSet().background.rect.width() / 2,
+		0, kScreenWidth - activeSet().background.rect.width());
+	_pos.y = CLIP<int16>(screenPos.y - activeSet().background.rect.height() / 2,
+		0, kScreenHeight - activeSet().background.rect.height());
 	_hover = -1;
 	_open = true;
 }
 
 // Icon rects share the coordinate space of the background rect
 int VerbPalette::hitIcon(const Common::Point &screenPos) const {
-	Common::Point local(screenPos.x - _pos.x + _background.rect.left,
-		screenPos.y - _pos.y + _background.rect.top);
+	Common::Point local(screenPos.x - _pos.x + activeSet().background.rect.left,
+		screenPos.y - _pos.y + activeSet().background.rect.top);
 	for (uint i = 0; i < 4; i++) {
-		if (!_icons[i].pixels || !_icons[i].rect.contains(local))
+		if (!activeSet().icons[i].pixels || !activeSet().icons[i].rect.contains(local))
 			continue;
-		byte pixel = _icons[i].pixels[
-			(local.y - _icons[i].rect.top) * _icons[i].rect.width() +
-			(local.x - _icons[i].rect.left)];
+		const Image &icon = activeSet().icons[i];
+		byte pixel = icon.pixels[
+			(local.y - icon.rect.top) * icon.rect.width() +
+			(local.x - icon.rect.left)];
 		if (pixel != kTransparentColor)
 			return (int)i;
 	}
@@ -150,8 +167,8 @@ void VerbPalette::updateHover(const Common::Point &screenPos) {
 bool VerbPalette::contains(const Common::Point &screenPos) const {
 	if (!_open)
 		return false;
-	Common::Rect area(_pos.x, _pos.y, _pos.x + _background.rect.width(),
-		_pos.y + _background.rect.height());
+	Common::Rect area(_pos.x, _pos.y, _pos.x + activeSet().background.rect.width(),
+		_pos.y + activeSet().background.rect.height());
 	return area.contains(screenPos);
 }
 
@@ -161,7 +178,7 @@ bool VerbPalette::handleClick(const Common::Point &screenPos, Verb &outVerb) {
 	if (icon < 0)
 		return false;
 
-	switch (_actionCodes[icon]) {
+	switch (activeSet().actionCodes[icon]) {
 	case kModePickup: outVerb = kVerbTake; break;
 	case kModeTalk: outVerb = kVerbTalk; break;
 	case kModeView: outVerb = kVerbLook; break;
@@ -174,14 +191,14 @@ bool VerbPalette::handleClick(const Common::Point &screenPos, Verb &outVerb) {
 void VerbPalette::draw(Graphics::Screen *screen) const {
 	if (!_open || !_loaded)
 		return;
-	blitImage(screen, _background.pixels, _pos.x, _pos.y,
-		_background.rect.width(), _background.rect.height());
+	blitImage(screen, activeSet().background.pixels, _pos.x, _pos.y,
+		activeSet().background.rect.width(), activeSet().background.rect.height());
 	// The hovered icon is drawn highlighted over the background
-	if (_hover >= 0 && _icons[_hover].pixels) {
-		const Image &icon = _icons[_hover];
+	if (_hover >= 0 && activeSet().icons[_hover].pixels) {
+		const Image &icon = activeSet().icons[_hover];
 		blitImage(screen, icon.pixels,
-			_pos.x + icon.rect.left - _background.rect.left,
-			_pos.y + icon.rect.top - _background.rect.top,
+			_pos.x + icon.rect.left - activeSet().background.rect.left,
+			_pos.y + icon.rect.top - activeSet().background.rect.top,
 			icon.rect.width(), icon.rect.height());
 	}
 }

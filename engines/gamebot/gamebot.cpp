@@ -312,6 +312,8 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 
 	debugC(kDebugResources, "Playing video %08x: %d frames %dx%d, sound %08x",
 		flicResId, decoder.getFrameCount(), decoder.getWidth(), decoder.getHeight(), soundCode);
+	// The cursor stays hidden while a video plays
+	CursorMan.showMouse(false);
 	_sounds.stopAll();
 	if (soundCode)
 		_sounds.playSound(soundCode);
@@ -343,6 +345,7 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 	}
 
 	_sounds.stopSound();
+	CursorMan.showMouse(true);
 	// The original restore after a video fades from black into the
 	// phase palette
 	fadeIn(_world.palette());
