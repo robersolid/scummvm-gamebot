@@ -148,6 +148,7 @@ public:
 
 	bool isInInventory(uint32 objectId) const { return _inventory.contains(objectId); }
 	void addToInventory(uint32 objectId);
+	void removeFromInventory(uint32 objectId);
 	const Common::HashMap<uint32, bool> &inventory() const { return _inventory; }
 
 	// Persistent object state: rules enable and disable objects and

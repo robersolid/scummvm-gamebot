@@ -183,6 +183,17 @@ void Logic::addToInventory(uint32 objectId) {
 	debugC(kDebugActions, "Object %08x added to the inventory", objectId);
 }
 
+// A disabled object leaves the inventory too, as the original
+// InventMaster extracts it on the disable event
+void Logic::removeFromInventory(uint32 objectId) {
+	if (!_inventory.contains(objectId))
+		return;
+	_inventory.erase(objectId);
+	if (g_engine->linkedObject() == objectId)
+		g_engine->linkObject(0);
+	debugC(kDebugActions, "Object %08x removed from the inventory", objectId);
+}
+
 void Logic::setObjectEnabled(uint32 objectId, bool enabled) {
 	_objectEnabled[objectId] = enabled;
 	g_engine->world().setEnabled(objectId, enabled);
@@ -554,10 +565,13 @@ void Logic::runAction(const ActionRule &rule, uint32 owner) {
 		break;
 	}
 	case kActionEnable:
-		setObjectEnabled(rule.actionParam1, true);
+		// The original direct enable/disable actions act on the rule
+		// owner; targeting another object goes through send-message
+		setObjectEnabled(owner, true);
 		break;
 	case kActionDisable:
-		setObjectEnabled(rule.actionParam1, false);
+		setObjectEnabled(owner, false);
+		removeFromInventory(owner);
 		break;
 	case kActionPhraseOn:
 		// The phrase's owner freezes its ambient animations while
@@ -586,6 +600,7 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 		break;
 	case kEventObjDisable:
 		setObjectEnabled(param2, false);
+		removeFromInventory(param2);
 		break;
 	case kEventObjEnable:
 		setObjectEnabled(param2, true);

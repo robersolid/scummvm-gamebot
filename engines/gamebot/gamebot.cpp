@@ -211,11 +211,19 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 		return;
 
 	// The inventory: picking an item hangs it from the cursor; the
-	// inventory stays open and right click closes it
+	// inventory stays open and right click closes it. Clicking another
+	// item while one hangs from the cursor combines the two.
 	if (_inventoryUI.isOpen()) {
 		uint32 item = _inventoryUI.handleClick(screenPos);
-		if (item)
-			linkObject(item);
+		if (item) {
+			if (_linkedObject && _linkedObject != item) {
+				uint32 linked = _linkedObject;
+				linkObject(0);
+				_logic.performVerb(item, kVerbUse, linked);
+			} else {
+				linkObject(item);
+			}
+		}
 		return;
 	}
 
@@ -644,7 +652,7 @@ Common::Error GamebotEngine::run() {
 }
 
 Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
-	if (!s.syncVersion(1))
+	if (!s.syncVersion(2))
 		return Common::kUnknownError;
 
 	uint32 phaseId = _world.currentPhaseId();
@@ -659,6 +667,32 @@ Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
 	s.syncAsUint16LE(layer);
 
 	_logic.syncGame(s);
+
+	// Since version 2 every character carries its own state, so a
+	// restore brings back the partner and the changer medallion
+	Character *all[3] = { &_mortadelo, &_filemon, &_both };
+	if (s.getVersion() >= 2) {
+		for (uint i = 0; i < 3; i++) {
+			int16 cx = all[i]->x(), cy = all[i]->y();
+			uint16 corient = all[i]->orientation(), clayer = all[i]->layer();
+			byte cvisible = all[i]->visible ? 1 : 0;
+			s.syncAsSint16LE(cx);
+			s.syncAsSint16LE(cy);
+			s.syncAsUint16LE(corient);
+			s.syncAsUint16LE(clayer);
+			s.syncAsByte(cvisible);
+			if (s.isLoading()) {
+				CharacterLocation location;
+				location.characterId = all[i]->objectId();
+				location.x = cx;
+				location.y = cy;
+				location.orientation = corient;
+				location.layer = clayer;
+				all[i]->enterPhase(_world, location);
+				all[i]->visible = cvisible != 0;
+			}
+		}
+	}
 
 	if (s.isLoading()) {
 		if (!_world.gotoPhase(phaseId))
