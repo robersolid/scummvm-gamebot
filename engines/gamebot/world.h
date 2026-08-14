@@ -63,6 +63,12 @@ public:
 	bool isEnabled(uint32 objectId) const;
 	void setEnabled(uint32 objectId, bool enabled);
 	bool startAnimation(uint32 objectId, uint32 resId);
+	bool startDetachedAnimation(const ResourceEntry &e);
+	bool skipEventAnimation();
+
+	// Freezes or resumes an object's ambient animations (e.g. while
+	// it takes part in a spoken exchange)
+	void pauseObjectAnims(uint32 objectId, bool paused);
 
 	// Re-applies the palette of the current phase (after a video)
 	void applyPalette() const;
@@ -141,6 +147,7 @@ private:
 		int activeAnim = -1;     // index into anims, -1 = static image
 		int16 curDeltaX = 0, curDeltaY = 0;
 		bool visible = true;
+		bool animsPaused = false;
 
 		const byte *currentPixels() const {
 			if (activeAnim >= 0) {
@@ -173,6 +180,7 @@ private:
 	void addDrawItem(const ObjectEntry &object, uint16 layer);
 	bool loadAnimation(const ResourceEntry &e, Animation &anim);
 	void updateItem(DrawItem &item, uint32 millis);
+	void emitStepEffects(const DrawItem &item, const Animation &anim) const;
 	void drawPathOverlay(Graphics::Screen *screen, const Character *actor) const;
 	void drawWalkMapOverlay(Graphics::Screen *screen) const;
 	void drawHotspotOverlay(Graphics::Screen *screen) const;

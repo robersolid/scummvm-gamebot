@@ -73,6 +73,7 @@ private:
 	MainMenu _mainMenu;         // the original main menu panel
 	SoundManager _sounds;       // ADPCM voices, effects and music
 	Common::Point _lastMousePhasePos; // for the in-bounds conditions
+	Common::String _hoverName;        // interactable name under the cursor
 	uint32 _linkedObject = 0;   // inventory object selected for use-with
 
 	// Loads the data file indexes. Returns false if a mandatory file
@@ -88,6 +89,10 @@ private:
 	Cursor _standardCursor, _hotCursor;
 	bool _hotCursorShown = false;
 	uint32 _hoverObjectId = 0;
+	// Left-button hold tracking for the verb palette (the original
+	// enters select mode after 400 ms without mouse events)
+	bool _leftDown = false;
+	uint32 _lastMouseEventTime = 0;
 
 	void loadCursor(uint32 resId, Cursor &cursor);
 	void setCursor(const Cursor &cursor);
@@ -95,6 +100,10 @@ private:
 public:
 	void handleMouseMove(const Common::Point &screenPos);
 	void handleMouseClick(const Common::Point &screenPos);
+	// The verb palette opens after holding the left button 400 ms over
+	// an interactable (the original MouseSys select mode); pointing and
+	// releasing runs the verb
+	void handleLeftUp(const Common::Point &screenPos);
 
 protected:
 	// Engine APIs
@@ -127,6 +136,8 @@ public:
 	}
 	void switchMaster();
 	void setMasterById(uint32 characterId);
+	// The character owning an id, or null if none/not loaded
+	Character *characterById(uint32 characterId);
 	Logic &logic() { return _logic; }
 	VerbPalette &verbPalette() { return _verbPalette; }
 	InventoryUI &inventoryUI() { return _inventoryUI; }
@@ -134,6 +145,7 @@ public:
 	MainMenu &mainMenu() { return _mainMenu; }
 	SoundManager &sounds() { return _sounds; }
 	const Common::Point &lastMousePhasePos() const { return _lastMousePhasePos; }
+	void drawHoverName(Graphics::Screen *screen) const;
 	void runMenuAction(int action);
 	// Selects an inventory object for use-with, swapping the cursor
 	// for its image; 0 restores the standard cursor

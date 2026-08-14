@@ -163,6 +163,7 @@ public:
 	// chain (next line, answer animation...) runs at once. Returns
 	// false when there was nothing to skip.
 	bool skipPhrase();
+	bool skipCutscene();
 
 	// Conversations (original DialogMaster): a dialog resource holds
 	// sentences the player can pick; a picked line is spoken, may run
@@ -174,9 +175,7 @@ public:
 	// True while a scripted sequence runs (a phrase on screen, a
 	// script-driven walk or an answer animation): player input that
 	// moves the characters is ignored meanwhile
-	bool isBusy() const {
-		return _writer.active() || _scriptedWalk != 0 || _pendingAnswerAnim != 0;
-	}
+	bool isBusy() const;
 	void drawDialog(Graphics::Screen *screen) const;
 	bool handleDialogClick(const Common::Point &screenPos);
 
@@ -189,7 +188,7 @@ private:
 	// Returns the number of rules that matched and ran.
 	uint dispatchEvent(uint32 eventId, uint32 param1, uint32 param2);
 	bool checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam);
-	void runAction(const ActionRule &rule);
+	void runAction(const ActionRule &rule, uint32 owner);
 	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3);
 	void sayGenericResponse(uint32 verbEventId, uint16 responseFlags);
 
@@ -221,6 +220,14 @@ private:
 
 	// Script-driven walk: the arrival event carries the packed target
 	uint32 _scriptedWalk = 0;
+	// Object reaching the inventory once the take gesture ends
+	uint32 _pendingTake = 0;
+	// Rule owner whose ambient animations pause during its phrase
+	uint32 _phraseOwner = 0;
+	// Character hidden while its detached event animation plays
+	uint32 _hiddenCharAnim = 0;
+	uint32 _hiddenCharId = 0;
+	void startEventAnim(const ResourceEntry &e);
 };
 
 } // End of namespace Gamebot

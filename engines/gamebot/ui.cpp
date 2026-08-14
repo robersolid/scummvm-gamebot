@@ -144,6 +144,14 @@ void VerbPalette::updateHover(const Common::Point &screenPos) {
 		_hover = hitIcon(screenPos);
 }
 
+bool VerbPalette::contains(const Common::Point &screenPos) const {
+	if (!_open)
+		return false;
+	Common::Rect area(_pos.x, _pos.y, _pos.x + _background.rect.width(),
+		_pos.y + _background.rect.height());
+	return area.contains(screenPos);
+}
+
 bool VerbPalette::handleClick(const Common::Point &screenPos, Verb &outVerb) {
 	int icon = hitIcon(screenPos);
 	_open = false;

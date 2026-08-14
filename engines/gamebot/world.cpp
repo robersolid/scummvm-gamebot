@@ -87,9 +87,10 @@ bool World::loadPhaseInit(uint32 phaseId) {
 	debugC(kDebugResources, "Phase %08x: %dx%d, music %x, fx %x", phaseId,
 		_phaseWidth, _phaseHeight, _musicCode, READ_LE_UINT32(data + 12));
 
-	// Weather does NOT start from the phase data: the game script
-	// turns it on and off through the fx-start message
-	_fxCode = 0;
+	// The phase activation starts its weather effect, exactly as the
+	// original VisualPhase posts the fx-start on evAppActivate; the
+	// script can still change it through the same message
+	_fxCode = READ_LE_UINT32(data + 12);
 	initWeather();
 	if (_musicCode)
 		g_engine->sounds().playMusic(_musicCode);
@@ -400,20 +401,56 @@ bool World::gotoPhase(uint32 phaseId) {
 			addDrawItem(world.object(layer.objectFirst + o), (uint16)l);
 	}
 
+	// Objects waiting in layer 0 load hidden at their active layer, so
+	// an enable can reveal them (the original moves them between the
+	// disabled layer and the one recorded in the object entry). They
+	// are merged into the descending-layer draw order.
+	if (phase.layerCount > 0) {
+		const LayerEntry &disabled = world.layer(phase.layerFirst);
+		uint firstHidden = _items.size();
+		for (uint o = 0; o < disabled.objectCount; o++) {
+			const ObjectEntry &object = world.object(disabled.objectFirst + o);
+			uint16 layer = (uint16)CLIP<uint32>(object.activeLayer, 1, phase.layerCount - 1);
+			uint before = _items.size();
+			addDrawItem(object, layer);
+			for (uint i = before; i < _items.size(); i++)
+				_items[i].visible = false;
+		}
+		for (uint i = firstHidden; i < _items.size(); i++) {
+			DrawItem item = _items[i];
+			_items.remove_at(i);
+			uint pos = 0;
+			while (pos < i && _items[pos].layer >= item.layer)
+				pos++;
+			_items.insert_at(pos, item);
+		}
+	}
+
 	debugC(kDebugResources, "Phase %08x loaded: %u draw items, %u hotspots, map %ux%u",
 		phaseId, _items.size(), _hotspots.size(), _mapWidth, _mapHeight);
 	return true;
 }
 
+// Plays the sound and shows the text a sequence step carries
+void World::emitStepEffects(const DrawItem &item, const Animation &anim) const {
+	if (anim.seqPos >= anim.sequence.size())
+		return;
+	const SequenceStep &step = anim.sequence[anim.seqPos];
+	if (step.soundCode)
+		g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType);
+	if (step.textCode)
+		g_engine->logic().writer().showTextCode(step.textCode);
+}
+
 void World::updateItem(DrawItem &item, uint32 millis) {
-	// While an event animation runs (started by rule or dialog), the
-	// automatic ones wait, as in the original tick handling
-	bool eventAnimRunning = item.activeAnim >= 0 &&
-		item.anims[item.activeAnim].running && !item.anims[item.activeAnim].autoFire;
+	// The original object has a single active resource: while any
+	// animation runs (automatic or event), the pending ones wait for
+	// it to end, in resource order
+	bool animRunning = item.activeAnim >= 0 && item.anims[item.activeAnim].running;
 
 	// Start whichever animation reaches its fire time; a firing
 	// animation becomes the active resource of the object
-	for (uint a = 0; a < item.anims.size() && !eventAnimRunning; a++) {
+	for (uint a = 0; a < item.anims.size() && !animRunning; a++) {
 		Animation &anim = item.anims[a];
 		if (anim.running || !anim.autoFire)
 			continue;
@@ -429,6 +466,8 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 			item.curDeltaX = item.curDeltaY = 0;
 			debugC(2, kDebugEvents, "Animation %08x/%08x starts",
 				item.objectId, anim.resId);
+			emitStepEffects(item, anim);
+			break; // one active resource at a time
 		}
 	}
 
@@ -490,24 +529,45 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 		debugC(3, kDebugEvents, "Animation %08x/%08x step %u frame %u",
 			item.objectId, anim.resId, anim.seqPos, imageIndex);
 
-		if (anim.seqPos < anim.sequence.size()) {
-			const SequenceStep &step = anim.sequence[anim.seqPos];
-			if (step.soundCode)
-				g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType);
-			// NPC speech: answer animations carry the spoken text of
-			// each frame in the sequence
-			if (step.textCode)
-				g_engine->logic().writer().showTextCode(step.textCode);
-		}
+		emitStepEffects(item, anim);
 	}
 }
 
 void World::update(uint32 millis) {
 	for (uint i = 0; i < _items.size(); i++) {
-		if (!_items[i].anims.empty() && _items[i].visible)
+		if (!_items[i].anims.empty() && _items[i].visible && !_items[i].animsPaused)
 			updateItem(_items[i], millis);
 	}
 	updateWeather(millis);
+}
+
+void World::pauseObjectAnims(uint32 objectId, bool paused) {
+	for (uint i = 0; i < _items.size(); i++) {
+		DrawItem &item = _items[i];
+		if (item.objectId != objectId)
+			continue;
+		item.animsPaused = paused;
+		if (paused) {
+			// The object drops back to its base pose while it listens
+			for (uint a = 0; a < item.anims.size(); a++) {
+				if (!item.anims[a].autoFire)
+					continue;
+				item.anims[a].running = false;
+				item.anims[a].seqPos = 0;
+			}
+			if (item.activeAnim >= 0 && item.anims[item.activeAnim].autoFire) {
+				item.activeAnim = -1;
+				item.curDeltaX = item.curDeltaY = 0;
+			}
+		} else {
+			// Ambient animations rearm with their own start pauses
+			uint32 millis = g_system->getMillis();
+			for (uint a = 0; a < item.anims.size(); a++)
+				if (item.anims[a].autoFire)
+					item.anims[a].fireTime = millis + item.anims[a].params.startPause;
+		}
+		return;
+	}
 }
 
 bool World::isEnabled(uint32 objectId) const {
@@ -532,6 +592,72 @@ void World::setEnabled(uint32 objectId, bool enabled) {
 		objectId, enabled ? "enable" : "disable");
 }
 
+// Plays an event animation that belongs to a character (the frames
+// draw the character at an absolute scene position, e.g. Mortadelo
+// picking the door lock); it renders as a transient front item
+bool World::startDetachedAnimation(const ResourceEntry &e) {
+	// A repeated activation restarts the running animation, as the
+	// original replaces its single active resource
+	for (uint i = 0; i < _items.size(); i++) {
+		DrawItem &existing = _items[i];
+		if (existing.objectId != e.objectId || existing.activeAnim < 0)
+			continue;
+		Animation &anim = existing.anims[existing.activeAnim];
+		if (anim.resId != e.resId)
+			continue;
+		anim.running = true;
+		anim.seqPos = 0;
+		anim.stepTime = g_system->getMillis() + anim.params.framePeriod;
+		debugC(kDebugActions, "Detached animation %08x/%08x restarted", e.objectId, e.resId);
+		return true;
+	}
+
+	DrawItem item;
+	item.objectId = e.objectId;
+	item.layer = 1; // front
+	Animation anim;
+	if (!loadAnimation(e, anim))
+		return false;
+	anim.autoFire = false;
+	anim.running = true;
+	anim.seqPos = 0;
+	anim.stepTime = g_system->getMillis() + anim.params.framePeriod;
+	anim.notifyEnd = true;
+	item.anims.push_back(anim);
+	item.activeAnim = 0;
+	_items.push_back(item);
+	debugC(kDebugActions, "Detached animation %08x/%08x started", e.objectId, e.resId);
+	emitStepEffects(_items.back(), _items.back().anims[0]);
+	return true;
+}
+
+// Jumps the running event animation to its end (fast-forward while
+// the player skips through a scripted scene); the end notification
+// fires as if it had played out
+bool World::skipEventAnimation() {
+	for (uint i = 0; i < _items.size(); i++) {
+		DrawItem &item = _items[i];
+		if (item.activeAnim < 0)
+			continue;
+		Animation &anim = item.anims[item.activeAnim];
+		if (!anim.running || !anim.notifyEnd)
+			continue;
+		uint32 resId = anim.resId;
+		anim.running = false;
+		anim.seqPos = 0;
+		item.activeAnim = -1;
+		item.curDeltaX = item.curDeltaY = 0;
+		uint32 millis = g_system->getMillis();
+		for (uint a = 0; a < item.anims.size(); a++)
+			if (item.anims[a].autoFire)
+				item.anims[a].fireTime = millis + item.anims[a].params.startPause;
+		debugC(kDebugEvents, "Animation %08x/%08x skipped", item.objectId, resId);
+		g_engine->logic().onAnimationEnded(resId);
+		return true;
+	}
+	return false;
+}
+
 bool World::startAnimation(uint32 objectId, uint32 resId) {
 	for (uint i = 0; i < _items.size(); i++) {
 		DrawItem &item = _items[i];
@@ -549,6 +675,7 @@ bool World::startAnimation(uint32 objectId, uint32 resId) {
 			item.visible = true;
 			item.curDeltaX = item.curDeltaY = 0;
 			debugC(kDebugActions, "Animation %08x/%08x started by rule", objectId, resId);
+			emitStepEffects(item, anim);
 			return true;
 		}
 	}

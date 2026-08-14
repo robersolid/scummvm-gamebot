@@ -60,6 +60,9 @@ enum CharacterResource {
 	kResStaticBack = 0x02,  // facing away (W to E through N)
 	kResTalkFront = 0x10,   // talking animation
 	kResTalkBack = 0x11,
+	kResTakeCrouch = 0x12,  // take animations (chosen by object flags)
+	kResTakeFront = 0x13,
+	kResTakeAbove = 0x14,
 	kResWalkBase = 0x20,    // + 1..8: walk animation per direction code
 };
 
@@ -109,6 +112,11 @@ public:
 	void setTalking(bool talking);
 	bool isTalking() const { return _talking; }
 
+	// Plays a one-shot action animation (the take gestures); returns
+	// false if the character lacks that animation
+	bool playActionAnim(uint32 code);
+	bool isActionAnimating() const { return _actionAnim != nullptr; }
+
 	uint32 objectId() const { return _objectId; }
 	bool isLoaded() const { return _loaded; }
 	bool isWalking() const { return _walking; }
@@ -154,10 +162,15 @@ private:
 	Sprite _staticFront, _staticBack;
 	WalkAnim _walkAnims[8]; // indexed by walk code - 0x21
 	WalkAnim _talkFront, _talkBack;
+	WalkAnim _takeAnims[3]; // crouch, front, above
 
 	bool _talking = false;
 	uint32 _talkStep = 0;
 	uint32 _talkStepTime = 0;
+
+	WalkAnim *_actionAnim = nullptr; // one-shot gesture in progress
+	uint32 _actionStep = 0;
+	uint32 _actionStepTime = 0;
 
 	int16 _x = 0, _y = 0;
 	uint16 _layer = 0, _orient = kOrientSouth;

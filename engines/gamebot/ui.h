@@ -50,6 +50,8 @@ public:
 	uint32 targetObject() const { return _objectId; }
 
 	void updateHover(const Common::Point &screenPos);
+	// True while the point stays inside the open palette
+	bool contains(const Common::Point &screenPos) const;
 	// Returns the picked verb through outVerb; false = closed with no pick
 	bool handleClick(const Common::Point &screenPos, Verb &outVerb);
 	void draw(Graphics::Screen *screen) const;

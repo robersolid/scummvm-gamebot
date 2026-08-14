@@ -94,6 +94,12 @@ void TextWriter::draw(Graphics::Screen *screen) const {
 	}
 }
 
+bool Logic::isBusy() const {
+	return _writer.active() || _scriptedWalk != 0 || _pendingAnswerAnim != 0 ||
+		_pendingTake != 0 || _hiddenCharAnim != 0 ||
+		g_engine->master().isActionAnimating();
+}
+
 void Logic::addToInventory(uint32 objectId) {
 	_inventory[objectId] = true;
 	setObjectEnabled(objectId, false);
@@ -213,11 +219,23 @@ void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 	uint matched = dispatchEvent(eventId, objectId, linkedObjectId);
 
 	// Taking an object marked as takeable is built into the original
-	// engine; the rule tables only cover the special cases
+	// engine; the rule tables only cover the special cases. The take
+	// gesture depends on the object flags, and the object reaches the
+	// inventory when the gesture ends.
 	if (verb == kVerbTake) {
 		const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
 		if (object && (object->flags & ObjectEntry::kFlagTakeable)) {
-			addToInventory(objectId);
+			uint32 animCode = kResTakeCrouch;
+			if (object->flags & ObjectEntry::kFlagTakeFront)
+				animCode = kResTakeFront;
+			if (object->flags & ObjectEntry::kFlagTakeAbove)
+				animCode = kResTakeAbove;
+			if (!(object->flags & ObjectEntry::kFlagTakeDirect) &&
+					g_engine->master().playActionAnim(animCode)) {
+				_pendingTake = objectId;
+			} else {
+				addToInventory(objectId);
+			}
 			return;
 		}
 	}
@@ -324,6 +342,13 @@ void Logic::update(uint32 millis) {
 		performVerb(_pendingObject, _pendingVerb, _pendingLinked);
 	}
 
+	// Complete a take once the gesture finishes
+	if (_pendingTake && !g_engine->master().isActionAnimating()) {
+		uint32 object = _pendingTake;
+		_pendingTake = 0;
+		addToInventory(object);
+	}
+
 	// Announce the end of a script-driven walk
 	if (_scriptedWalk && !g_engine->master().isWalking()) {
 		uint32 packed = _scriptedWalk;
@@ -357,7 +382,7 @@ uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
 			eventName(eventId) ? eventName(eventId) : "?", param1, param2,
 			actionName(rule.actionId) ? actionName(rule.actionId) : "?",
 			rule.actionParam1, rule.actionParam2, rule.actionParam3);
-		runAction(rule);
+		runAction(rule, actions.ruleOwner(i));
 		matched++;
 	}
 	s_dispatchDepth--;
@@ -416,7 +441,24 @@ void Logic::resetGame() {
 	g_engine->gotoPhase(0x2001);
 }
 
-void Logic::runAction(const ActionRule &rule) {
+// Starts an event animation from a rule or message. Animations owned
+// by a character (e.g. Mortadelo picking the door lock) draw at an
+// absolute scene position, so they run as detached front items with
+// the character hidden until they end.
+void Logic::startEventAnim(const ResourceEntry &e) {
+	Character *ch = g_engine->characterById(e.objectId);
+	if (ch) {
+		if (g_engine->world().startDetachedAnimation(e)) {
+			ch->visible = false;
+			_hiddenCharAnim = e.resId;
+			_hiddenCharId = e.objectId;
+		}
+	} else {
+		g_engine->world().startAnimation(e.objectId, e.resId);
+	}
+}
+
+void Logic::runAction(const ActionRule &rule, uint32 owner) {
 	switch (rule.actionId) {
 	case kActionSendMsg:
 		handleMessage(rule.actionParam1, rule.actionParam2, rule.actionParam3);
@@ -428,7 +470,7 @@ void Logic::runAction(const ActionRule &rule) {
 		else if (e->type == kResAnimationFlic)
 			g_engine->playVideo(rule.actionParam1);
 		else
-			g_engine->world().startAnimation(e->objectId, rule.actionParam1);
+			startEventAnim(*e);
 		break;
 	}
 	case kActionEnable:
@@ -438,6 +480,12 @@ void Logic::runAction(const ActionRule &rule) {
 		setObjectEnabled(rule.actionParam1, false);
 		break;
 	case kActionPhraseOn:
+		// The phrase's owner freezes its ambient animations while
+		// the line plays, as the original waits on running autos
+		if (owner && owner != g_engine->master().objectId()) {
+			_phraseOwner = owner;
+			g_engine->world().pauseObjectAnims(owner, true);
+		}
 		sayPhrase(rule.actionParam1, rule.actionParam2);
 		break;
 	case kActionInputEnable:
@@ -467,7 +515,7 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 		if (e && e->type == kResAnimationFlic)
 			g_engine->playVideo(param2);
 		else if (e)
-			g_engine->world().startAnimation(e->objectId, param2);
+			startEventAnim(*e);
 		break;
 	}
 	case kEventDialogActivate:
@@ -537,8 +585,20 @@ bool Logic::skipPhrase() {
 	return true;
 }
 
+// A click while a scripted scene runs fast-forwards it one piece at
+// a time: first the spoken line, then any running event animation
+bool Logic::skipCutscene() {
+	if (skipPhrase())
+		return true;
+	return g_engine->world().skipEventAnimation();
+}
+
 void Logic::onPhraseEnded() {
 	g_engine->master().setTalking(false);
+	if (_phraseOwner) {
+		g_engine->world().pauseObjectAnims(_phraseOwner, false);
+		_phraseOwner = 0;
+	}
 
 	// The original signals the end of a spoken phrase with an
 	// AnimEnded event carrying the voice code, which rules use to
@@ -570,6 +630,13 @@ void Logic::onPhraseEnded() {
 }
 
 void Logic::onAnimationEnded(uint32 resId) {
+	// A character hidden behind its detached animation comes back
+	if (_hiddenCharAnim && resId == _hiddenCharAnim) {
+		Character *ch = g_engine->characterById(_hiddenCharId);
+		if (ch)
+			ch->visible = true;
+		_hiddenCharAnim = _hiddenCharId = 0;
+	}
 	if (_pendingAnswerAnim && resId == _pendingAnswerAnim) {
 		_pendingAnswerAnim = 0;
 		if (_sentenceFlags & kDialogGoodbye)

@@ -28,6 +28,8 @@
 #include "common/tokenizer.h"
 #include "engines/util.h"
 #include "graphics/cursorman.h"
+#include "graphics/font.h"
+#include "graphics/fontman.h"
 #include "graphics/framelimiter.h"
 #include "graphics/paletteman.h"
 #include "video/flic_decoder.h"
@@ -95,7 +97,12 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 		return;
 	}
 	if (_verbPalette.isOpen()) {
-		_verbPalette.updateHover(screenPos);
+		// Leaving the palette rectangle cancels the selection, as the
+		// original select mode does
+		if (!_verbPalette.contains(screenPos))
+			_verbPalette.close();
+		else
+			_verbPalette.updateHover(screenPos);
 		return;
 	}
 
@@ -106,6 +113,7 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 	if (hovering && hit.objectId != _hoverObjectId)
 		debugC(kDebugEvents, "Hovering %08x '%s'", hit.objectId, hit.name.c_str());
 	_hoverObjectId = hovering ? hit.objectId : 0;
+	_hoverName = hovering ? hit.name : Common::String();
 
 	// While an object hangs from the cursor its image stays put
 	if (!_linkedObject && hovering != _hotCursorShown) {
@@ -177,8 +185,9 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_logic.handleDialogClick(screenPos))
 		return;
 
-	// A click on a spoken line skips it and continues the chain
-	if (_logic.skipPhrase())
+	// A click on a spoken line or a scripted animation skips it and
+	// continues the chain
+	if (_logic.skipCutscene())
 		return;
 
 	// Scripted sequences ignore every player input, as the original
@@ -199,44 +208,72 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_changerBadge.handleClick(screenPos))
 		return;
 
-	// An open verb palette resolves the click into a verb
+	Common::Point phasePos(screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
+	HitResult hit;
+	if (_world.hitTest(phasePos, hit)) {
+		debugC(kDebugEvents, "Click on %08x '%s' (%s)", hit.objectId, hit.name.c_str(),
+			resourceTypeName(hit.type));
+
+		if (hit.exitPhase) {
+			if (gotoPhase(hit.exitPhase))
+				debugC(kDebugEvents, "Exit taken to phase %08x", hit.exitPhase);
+			return;
+		}
+
+		if (_linkedObject) {
+			// Use the selected inventory object on the clicked one
+			uint32 item = _linkedObject;
+			linkObject(0);
+			_logic.interactWith(hit.objectId, kVerbUse, item);
+			return;
+		}
+		// Verbs go through the hold-to-select palette; a short click
+		// on an object just walks towards it
+	}
+
+	debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
+	if (_linkedObject)
+		linkObject(0);
+	master().walkTo(_world, phasePos);
+}
+
+// Releasing the left button either picks the verb under the cursor
+// (select mode) or acts as the click the original sends on button up
+void GamebotEngine::handleLeftUp(const Common::Point &screenPos) {
+	_leftDown = false;
 	if (_verbPalette.isOpen()) {
 		Verb verb;
 		uint32 target = _verbPalette.targetObject();
-		if (_verbPalette.handleClick(screenPos, verb))
+		bool hitVerb = _verbPalette.handleClick(screenPos, verb);
+		_verbPalette.close();
+		if (hitVerb)
 			_logic.interactWith(target, verb);
 		return;
 	}
+	handleMouseClick(screenPos);
+}
 
-	Common::Point phasePos(screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
-	HitResult hit;
-	if (!_world.hitTest(phasePos, hit)) {
-		// Clicking the floor walks there
-		debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
-		if (_linkedObject)
-			linkObject(0);
-		master().walkTo(_world, phasePos);
+// The name of the hovered interactable, at the bottom of the screen
+// (the original SayName label)
+void GamebotEngine::drawHoverName(Graphics::Screen *screen) const {
+	if (_hoverName.empty() || _logic.isBusy() || _logic.isDialogOpen() ||
+			_inventoryUI.isOpen() || _verbPalette.isOpen() || _mainMenu.isOpen())
 		return;
-	}
-
-	debugC(kDebugEvents, "Click on %08x '%s' (%s)", hit.objectId, hit.name.c_str(),
-		resourceTypeName(hit.type));
-
-	if (hit.exitPhase) {
-		if (gotoPhase(hit.exitPhase))
-			debugC(kDebugEvents, "Exit taken to phase %08x", hit.exitPhase);
+	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kBigGUIFont);
+	if (!font)
 		return;
+	byte palette[256 * 3];
+	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
+	int bright = 255, dark = 254, maxSum = -1, minSum = 999;
+	for (int i = 1; i < 256; i++) {
+		int sum = palette[i * 3] + palette[i * 3 + 1] + palette[i * 3 + 2];
+		if (sum > maxSum) { maxSum = sum; bright = i; }
+		if (sum < minSum) { minSum = sum; dark = i; }
 	}
-
-	if (_linkedObject) {
-		// Use the selected inventory object on the clicked one
-		uint32 item = _linkedObject;
-		linkObject(0);
-		_logic.interactWith(hit.objectId, kVerbUse, item);
-		return;
-	}
-
-	_verbPalette.open(screenPos, hit.objectId);
+	Common::U32String name(_hoverName, Common::kISO8859_1);
+	int y = screen->h - font->getFontHeight() - 6;
+	font->drawString(screen, name, 21, y + 2, screen->w - 40, dark, Graphics::kTextAlignCenter);
+	font->drawString(screen, name, 20, y, screen->w - 40, bright, Graphics::kTextAlignCenter);
 }
 
 bool GamebotEngine::playVideo(uint32 flicResId) {
@@ -279,7 +316,9 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 		_sounds.playSound(soundCode);
 	decoder.start();
 
-	bool skipped = false;
+	// Test harness hook: skip every video right away
+	bool skipped = ConfMan.hasKey("gamebot_fastvideo") &&
+		ConfMan.getBool("gamebot_fastvideo");
 	while (!shouldQuit() && !decoder.endOfVideo() && !skipped) {
 		if (decoder.needsUpdate()) {
 			const Graphics::Surface *frame = decoder.decodeNextFrame();
@@ -294,6 +333,7 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 		Common::Event event;
 		while (g_system->getEventManager()->pollEvent(event)) {
 			if (event.type == Common::EVENT_LBUTTONDOWN ||
+					event.type == Common::EVENT_RBUTTONDOWN ||
 					(event.type == Common::EVENT_KEYDOWN &&
 					event.kbd.keycode == Common::KEYCODE_ESCAPE))
 				skipped = true;
@@ -320,12 +360,17 @@ void GamebotEngine::switchMaster() {
 	debugC(kDebugEvents, "Master is now %08x", _master->objectId());
 }
 
-void GamebotEngine::setMasterById(uint32 characterId) {
+Character *GamebotEngine::characterById(uint32 characterId) {
 	Character *character =
 		(characterId == _mortadelo.objectId()) ? &_mortadelo :
 		(characterId == _filemon.objectId()) ? &_filemon :
 		(characterId == _both.objectId()) ? &_both : nullptr;
-	if (!character || !character->isLoaded())
+	return (character && character->isLoaded()) ? character : nullptr;
+}
+
+void GamebotEngine::setMasterById(uint32 characterId) {
+	Character *character = characterById(characterId);
+	if (!character)
 		return;
 	_master->setTalking(false);
 	_master = character;
@@ -454,13 +499,23 @@ Common::Error GamebotEngine::run() {
 		while (g_system->getEventManager()->pollEvent(e)) {
 			switch (e.type) {
 			case Common::EVENT_MOUSEMOVE:
+				_lastMouseEventTime = g_system->getMillis();
 				handleMouseMove(e.mouse);
 				break;
 			case Common::EVENT_LBUTTONDOWN:
-				handleMouseClick(e.mouse);
+				// Actions run on release; holding still 400 ms over an
+				// interactable opens the verb palette instead
+				_leftDown = true;
+				_lastMouseEventTime = g_system->getMillis();
+				break;
+			case Common::EVENT_LBUTTONUP:
+				handleLeftUp(e.mouse);
 				break;
 			case Common::EVENT_RBUTTONDOWN:
-				// Right click toggles the inventory safe
+				// Right click also skips through scripted scenes;
+				// otherwise it toggles the inventory safe
+				if (_logic.skipCutscene())
+					break;
 				if (!_logic.isDialogOpen() && !_logic.isBusy() && !_mainMenu.isOpen()) {
 					_verbPalette.close();
 					_inventoryUI.toggle();
@@ -492,6 +547,17 @@ Common::Error GamebotEngine::run() {
 		// The cursor vanishes while a scripted sequence runs
 		if (CursorMan.isVisible() == _logic.isBusy())
 			CursorMan.showMouse(!_logic.isBusy());
+
+		// Original select mode: the left button held still for 400 ms
+		// over a hot object pops the verb palette under the cursor
+		if (_leftDown && !_verbPalette.isOpen() && _hoverObjectId &&
+				!_linkedObject && millis - _lastMouseEventTime >= 400 &&
+				!_logic.isBusy() && !_logic.isDialogOpen() &&
+				!_mainMenu.isOpen() && !_inventoryUI.isOpen()) {
+			Common::Point mouse = g_system->getEventManager()->getMousePos();
+			_verbPalette.open(mouse, _hoverObjectId);
+			_verbPalette.updateHover(mouse);
+		}
 		_world.update(millis);
 		_mortadelo.tick(millis, _world);
 		_filemon.tick(millis, _world);
@@ -512,6 +578,7 @@ Common::Error GamebotEngine::run() {
 		}
 
 		_world.draw(_screen, &master(), secondCharacter());
+		drawHoverName(_screen);
 		_logic.writer().draw(_screen);
 		_logic.drawDialog(_screen);
 		_changerBadge.draw(_screen);

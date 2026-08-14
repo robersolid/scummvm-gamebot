@@ -402,6 +402,7 @@ bool Console::cmdWait(int argc, const char **argv) {
 			const_cast<Character *>(g_engine->secondCharacter())->tick(millis, g_engine->world());
 		g_engine->logic().update(millis);
 		g_engine->world().draw(g_engine->_screen, &g_engine->master(), g_engine->secondCharacter());
+		g_engine->drawHoverName(g_engine->_screen);
 		g_engine->logic().writer().draw(g_engine->_screen);
 		g_engine->logic().drawDialog(g_engine->_screen);
 		g_engine->changerBadge().update(millis);
@@ -833,6 +834,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 
 	// Render a fresh frame and save it with the current system palette
 	g_engine->world().draw(g_engine->_screen, &g_engine->master(), g_engine->secondCharacter());
+	g_engine->drawHoverName(g_engine->_screen);
 	g_engine->logic().writer().draw(g_engine->_screen);
 	g_engine->logic().drawDialog(g_engine->_screen);
 	g_engine->changerBadge().draw(g_engine->_screen);

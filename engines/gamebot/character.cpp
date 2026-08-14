@@ -56,6 +56,21 @@ Character::~Character() {
 	delete[] _talkBack.frames;
 	for (uint i = 0; i < 8; i++)
 		delete[] _walkAnims[i].frames;
+	for (uint i = 0; i < 3; i++)
+		delete[] _takeAnims[i].frames;
+}
+
+bool Character::playActionAnim(uint32 code) {
+	if (code < kResTakeCrouch || code > kResTakeAbove)
+		return false;
+	WalkAnim &anim = _takeAnims[code - kResTakeCrouch];
+	if (!anim.valid)
+		return false;
+	_actionAnim = &anim;
+	_actionStep = 0;
+	_actionStepTime = 0;
+	debugC(kDebugWalk, "Character %08x plays action anim %02x", _objectId, code);
+	return true;
 }
 
 bool Character::loadAnimResource(const ResourceEntry &e, WalkAnim &anim) {
@@ -135,6 +150,8 @@ bool Character::load(uint32 objectId) {
 			loadAnimResource(e, _talkFront);
 		else if (isAnimation && code == kResTalkBack)
 			loadAnimResource(e, _talkBack);
+		else if (isAnimation && code >= kResTakeCrouch && code <= kResTakeAbove)
+			loadAnimResource(e, _takeAnims[code - kResTakeCrouch]);
 	}
 
 	if (!_staticFront.pixels) {
@@ -397,6 +414,22 @@ bool Character::walkTo(const World &world, Common::Point target) {
 }
 
 void Character::tick(uint32 millis, const World &world) {
+	// One-shot gesture in progress (e.g. taking an object)
+	if (_actionAnim) {
+		if (!_actionStepTime)
+			_actionStepTime = millis + _actionAnim->framePeriod;
+		while (_actionAnim && millis >= _actionStepTime) {
+			_actionStepTime += _actionAnim->framePeriod ? _actionAnim->framePeriod : 100;
+			_actionStep++;
+			if (_actionStep >= _actionAnim->sequence.size() ||
+					_actionAnim->sequence[_actionStep] >= SequenceStep::kAutoDisable) {
+				_actionAnim = nullptr;
+				_actionStep = 0;
+			}
+		}
+		return;
+	}
+
 	// Talking animation runs on its own clock while a phrase shows
 	if (_talking) {
 		const WalkAnim &anim = (_orient < kOrientEast || _orient > kOrientWest)
@@ -486,6 +519,15 @@ void Character::drawScaled(Graphics::Screen *screen, const byte *pixels,
 void Character::draw(Graphics::Screen *screen, const Common::Point &origin) const {
 	if (!_loaded || !visible)
 		return;
+
+	if (_actionAnim) {
+		uint32 imageIndex = _actionAnim->sequence.empty() ? 1 : _actionAnim->sequence[_actionStep];
+		if (imageIndex < 1 || imageIndex > _actionAnim->imageCount)
+			imageIndex = 1;
+		drawScaled(screen, _actionAnim->frames + (imageIndex - 1) * _actionAnim->frameSize,
+			_actionAnim->rect, origin);
+		return;
+	}
 
 	if (_walking && _currentAnim >= 0) {
 		const WalkAnim &anim = _walkAnims[_currentAnim];
