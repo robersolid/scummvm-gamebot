@@ -762,15 +762,16 @@ bool OptionsPanels::handleClick(const Common::Point &screenPos) {
 				}
 				return false;
 			}
-			// Saving stamps the current date as the slot text
+			// Saving stamps the current date as the slot text and goes
+			// back to the game, as the original save event does
 			TimeDate td;
 			g_system->getTimeAndDate(td);
 			Common::String desc = Common::String::format(
 				"%02d/%02d/%04d %02d:%02d", td.tm_mday, td.tm_mon + 1,
 				td.tm_year + 1900, td.tm_hour, td.tm_min);
 			g_engine->saveGameState(_marked + 1, desc);
-			refreshSaves();
-			return false;
+			close();
+			return true;
 		}
 		if (hitImage(screenPos, back.states[0]) > 0) {
 			sounds.playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);

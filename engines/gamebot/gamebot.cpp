@@ -188,8 +188,9 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	// options panels come first
 	if (_mainMenu.isOpen()) {
 		if (_optionsPanels.isOpen()) {
+			// Loading and saving both drop back into the game
 			if (_optionsPanels.handleClick(screenPos))
-				_mainMenu.close(); // a game was loaded
+				_mainMenu.close();
 			return;
 		}
 		runMenuAction(_mainMenu.handleClick(screenPos));
