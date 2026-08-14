@@ -78,6 +78,44 @@ void GamebotEngine::loadCursor(uint32 resId, Cursor &cursor) {
 	warning("Mouse cursor resource %08x not found", resId);
 }
 
+// Cursor image codes of the original MouseSys resources
+enum {
+	kCursorStandard = 0x00030001,
+	kCursorHot = 0x00030002,
+	kCursorSelecting = 0x00030003,
+	kCursorClick = 0x00030008
+};
+
+const GamebotEngine::Cursor *GamebotEngine::cursorFor(uint32 resId) {
+	if (_cursorCache.contains(resId))
+		return _cursorCache[resId].pixels ? &_cursorCache[resId] : nullptr;
+	Cursor &cursor = _cursorCache[resId];
+	loadCursor(resId, cursor);
+	return cursor.pixels ? &cursor : nullptr;
+}
+
+// Applies the cursor image the current state asks for: the click
+// image while the button is down, the selecting one over the verb
+// palette, and the object's own hot cursor (the exit arrows) or the
+// generic pair otherwise
+void GamebotEngine::updateCursorImage() {
+	if (_linkedObject) {
+		_appliedCursorRes = 0;
+		return;
+	}
+	uint32 desired = _verbPalette.isOpen() ? kCursorSelecting
+		: (_leftDown ? kCursorClick : _hoverCursorRes);
+	if (desired == _appliedCursorRes)
+		return;
+	const Cursor *cursor = cursorFor(desired);
+	if (!cursor && desired != kCursorStandard)
+		cursor = cursorFor(kCursorStandard);
+	if (cursor) {
+		setCursor(*cursor);
+		_appliedCursorRes = desired;
+	}
+}
+
 void GamebotEngine::setCursor(const Cursor &cursor) {
 	if (!cursor.pixels)
 		return;
@@ -118,15 +156,24 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 	_hoverObjectId = hovering ? hit.objectId : 0;
 	_hoverName = hovering ? hit.name : Common::String();
 
-	if (hovering != _hotCursorShown) {
-		if (_linkedObject)
+	if (_linkedObject) {
+		if (hovering != _hotCursorShown) {
 			// The carried object swaps to its red-outlined image while
 			// it hovers an interactable (original evObjSetInvImage)
 			applyLinkedCursor(hovering);
-		else
-			setCursor(hovering ? _hotCursor : _standardCursor);
-		_hotCursorShown = hovering;
+			_hotCursorShown = hovering;
+		}
+		return;
 	}
+
+	// Each object can carry its own hot cursor (the exit arrows of
+	// the phase and map exits); the generic pair covers the rest
+	uint32 wanted = kCursorStandard;
+	if (hovering) {
+		const ObjectEntry *object = _initialWorld.findObject(hit.objectId);
+		wanted = (object && object->hotCursor) ? object->hotCursor : kCursorHot;
+	}
+	_hoverCursorRes = wanted;
 }
 
 // Puts the linked object's inventory image on the cursor, in its
@@ -217,13 +264,16 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_inventoryUI.isOpen()) {
 		uint32 item = _inventoryUI.handleClick(screenPos);
 		if (item) {
-			if (_linkedObject && _linkedObject != item) {
+			if (_linkedObject) {
 				uint32 linked = _linkedObject;
 				linkObject(0);
 				_logic.performVerb(item, kVerbUse, linked);
 			} else {
 				linkObject(item);
 			}
+		} else if (_linkedObject) {
+			// Releasing over the open safe puts the object back
+			linkObject(0);
 		}
 		return;
 	}
@@ -258,6 +308,7 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	debugC(kDebugEvents, "Click on floor at (%d,%d)", phasePos.x, phasePos.y);
 	if (_linkedObject)
 		linkObject(0);
+	_logic.cancelPendingVerb();
 	master().walkTo(_world, phasePos);
 }
 
@@ -280,10 +331,19 @@ void GamebotEngine::handleLeftUp(const Common::Point &screenPos) {
 // The name of the hovered interactable, written exactly like any
 // writer text (the original posts it as evTextWriteStr)
 void GamebotEngine::drawHoverName(Graphics::Screen *screen) const {
-	if (_hoverName.empty() || _logic.isBusy() || _logic.isDialogOpen() ||
-			_inventoryUI.isOpen() || _verbPalette.isOpen() || _mainMenu.isOpen())
+	if (_logic.isBusy() || _logic.isDialogOpen() || _verbPalette.isOpen() ||
+			_mainMenu.isOpen())
 		return;
-	_logic.writer().drawText(screen, _hoverName, false);
+	// Inside the open safe the hovered item says its name too
+	if (_inventoryUI.isOpen()) {
+		uint32 item = _inventoryUI.hoverObject();
+		const ObjectEntry *object = item ? _initialWorld.findObject(item) : nullptr;
+		if (object && !object->name.empty())
+			_logic.writer().drawText(screen, object->name, false);
+		return;
+	}
+	if (!_hoverName.empty())
+		_logic.writer().drawText(screen, _hoverName, false);
 }
 
 bool GamebotEngine::playVideo(uint32 flicResId) {
@@ -321,9 +381,9 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 
 	debugC(kDebugResources, "Playing video %08x: %d frames %dx%d, sound %08x",
 		flicResId, decoder.getFrameCount(), decoder.getWidth(), decoder.getHeight(), soundCode);
-	// The cursor stays hidden while a video plays
+	// The cursor stays hidden while a video plays; the phase music
+	// keeps running underneath, as the original never stops it
 	CursorMan.showMouse(false);
-	_sounds.stopAll();
 	if (soundCode)
 		_sounds.playSound(soundCode);
 	decoder.start();
@@ -359,8 +419,6 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 	// The original restore after a video fades from black into the
 	// phase palette
 	fadeIn(_world.palette());
-	if (_world.musicCode())
-		_sounds.playMusic(_world.musicCode());
 	return true;
 }
 
@@ -611,6 +669,7 @@ Common::Error GamebotEngine::run() {
 		// The cursor vanishes while a scripted sequence runs
 		if (CursorMan.isVisible() == _logic.isBusy())
 			CursorMan.showMouse(!_logic.isBusy());
+		updateCursorImage();
 
 		// Original select mode: the left button held still for 400 ms
 		// over a hot object pops the verb palette under the cursor

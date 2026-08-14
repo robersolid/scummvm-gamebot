@@ -88,6 +88,13 @@ private:
 		uint16 hotX = 0, hotY = 0;
 	};
 	Cursor _standardCursor, _hotCursor;
+	// Every mouse image of the original driver, loaded on demand:
+	// standard, hot, selecting, the four exit arrows and the click
+	Common::HashMap<uint32, Cursor> _cursorCache;
+	uint32 _hoverCursorRes = 0x00030001;
+	uint32 _appliedCursorRes = 0;
+	const Cursor *cursorFor(uint32 resId);
+	void updateCursorImage();
 	bool _hotCursorShown = false;
 	uint32 _hoverObjectId = 0;
 	// Left-button hold tracking for the verb palette (the original

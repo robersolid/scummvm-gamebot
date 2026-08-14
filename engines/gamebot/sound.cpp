@@ -51,6 +51,12 @@ bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type) {
 	if (!data)
 		return false;
 
+	// The volume category follows the resource type, as the original
+	// mixer picks the slider from it: aSound goes to voices, aFXSound
+	// to the effects
+	type = (e->type == kResFXSound) ? Audio::Mixer::kSFXSoundType
+		: Audio::Mixer::kSpeechSoundType;
+
 	Common::MemoryReadStream *memory =
 		new Common::MemoryReadStream(data, e->size, DisposeAfterUse::YES);
 	Audio::RewindableAudioStream *stream = Audio::makeADPCMStream(

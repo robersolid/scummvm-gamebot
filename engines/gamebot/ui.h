@@ -214,6 +214,9 @@ private:
 	bool _loaded = false;
 	bool _open = false;
 	uint32 _hoverObject = 0;
+
+public:
+	uint32 hoverObject() const { return _open ? _hoverObject : 0; }
 };
 
 // The load, save and options screens of the original OptionsMaster:

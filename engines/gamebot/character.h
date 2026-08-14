@@ -64,6 +64,7 @@ enum CharacterResource {
 	kResTakeFront = 0x13,
 	kResTakeAbove = 0x14,
 	kResWalkBase = 0x20,    // + 1..8: walk animation per direction code
+	kResIdleFirst = 0x30,   // idle fidgets 0x30-0x34 (glasses, blinks)
 };
 
 // Walk animation codes per direction (original PersAniMover*).
@@ -111,11 +112,20 @@ public:
 	// on the orientation, as in the original evPersHabla handling)
 	void setTalking(bool talking);
 	bool isTalking() const { return _talking; }
+	void stopWalking() {
+		_walking = false;
+		selectIdle();
+	}
+	void setOrientation(uint16 orient) { _orient = orient; }
+	// Snaps to an object's interaction point: position, orientation,
+	// layer and the scale of the target row (original arrival code)
+	void takeInteractionPose(const World &world, const ObjectEntry &object);
 
 	// Plays a one-shot action animation (the take gestures); returns
 	// false if the character lacks that animation
 	bool playActionAnim(uint32 code);
-	bool isActionAnimating() const { return _actionAnim != nullptr; }
+	// Idle fidgets are interruptible and never count as busy
+	bool isActionAnimating() const { return _actionAnim && !_actionInterruptible; }
 
 	// Scene (event) animation: the original swaps the character's
 	// active resource for it and draws it at absolute scene
@@ -151,7 +161,8 @@ private:
 		uint32 frameSize = 0;
 		uint32 imageCount = 0;
 		uint32 framePeriod = 0;
-		Common::Array<uint32> sequence; // frame indexes (1-based)
+		uint32 startPause = 0;
+		Common::Array<SequenceStep> sequence; // frames with sound/text
 	};
 
 	struct SceneAnim {
@@ -194,6 +205,12 @@ private:
 	WalkAnim *_actionAnim = nullptr; // one-shot gesture in progress
 	uint32 _actionStep = 0;
 	uint32 _actionStepTime = 0;
+	bool _actionInterruptible = false; // idle fidgets cancel on input
+	bool _actionHalfFired = false;     // take event fired at mid gesture
+	// Idle fidget animations (codes 0x30-0x34: cleaning the glasses,
+	// blinking...) played after a pause without activity
+	WalkAnim _idleAnims[5];
+	uint32 _idleTime = 0;
 
 	int16 _x = 0, _y = 0;
 	uint16 _layer = 0, _orient = kOrientSouth;

@@ -118,6 +118,7 @@ public:
 			_hideTime = millis + 300;
 	}
 	void update(uint32 millis);
+	void expire() { _hideTime = 1; }
 	void draw(Graphics::Screen *screen) const;
 	// Renders a text in the original writer style: bottom strip, up to
 	// two centered lines, yellow (or hot orange) over a double shadow
@@ -145,11 +146,15 @@ public:
 	// Immediately dispatches a verb event to an object's rule table
 	void performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId = 0);
 	void update(uint32 millis);
+	// A fresh walk click drops the queued verb, as the original wipes
+	// its pending event before recomputing the path
+	void cancelPendingVerb() { _pendingActive = false; }
 
 	bool isInInventory(uint32 objectId) const { return _inventory.contains(objectId); }
 	void addToInventory(uint32 objectId);
 	void removeFromInventory(uint32 objectId);
 	const Common::HashMap<uint32, bool> &inventory() const { return _inventory; }
+	const Common::Array<uint32> &inventoryOrder() const { return _inventoryOrder; }
 
 	// Persistent object state: rules enable and disable objects and
 	// the change must survive leaving and re-entering the phase
@@ -194,6 +199,7 @@ public:
 	// Chain notifications
 	void onPhraseEnded();
 	void onAnimationEnded(uint32 resId);
+	void onTakeGestureHalf();
 
 private:
 	// Dispatches an event through the rule table of an object.
@@ -211,6 +217,7 @@ private:
 	void endDialog();
 
 	Common::HashMap<uint32, bool> _inventory;
+	Common::Array<uint32> _inventoryOrder; // insertion order, as the original bag
 	Common::HashMap<uint32, bool> _objectEnabled; // overrides vs default.def
 	TextWriter _writer;
 	uint32 _phraseSound = 0; // voice code of the phrase on screen
@@ -232,6 +239,7 @@ private:
 
 	// Script-driven walk: the arrival event carries the packed target
 	uint32 _scriptedWalk = 0;
+	uint32 _scriptedWalkOrient = 0;
 	// Object reaching the inventory once the take gesture ends
 	uint32 _pendingTake = 0;
 	// Rule owner whose ambient animations pause during its phrase

@@ -59,6 +59,8 @@ Character::~Character() {
 		delete[] _walkAnims[i].frames;
 	for (uint i = 0; i < 3; i++)
 		delete[] _takeAnims[i].frames;
+	for (uint i = 0; i < 5; i++)
+		delete[] _idleAnims[i].frames;
 }
 
 // The original evObjActivateAnim on a character: any walk, gesture or
@@ -151,6 +153,8 @@ bool Character::playActionAnim(uint32 code) {
 	_actionAnim = &anim;
 	_actionStep = 0;
 	_actionStepTime = 0;
+	_actionInterruptible = false;
+	_actionHalfFired = false;
 	debugC(kDebugWalk, "Character %08x plays action anim %02x", _objectId, code);
 	return true;
 }
@@ -167,11 +171,15 @@ bool Character::loadAnimResource(const ResourceEntry &e, WalkAnim &anim) {
 	anim.imageCount = READ_LE_UINT32(data + 16);
 	uint32 sequenceCount = READ_LE_UINT32(data + 20);
 	anim.framePeriod = READ_LE_UINT32(data + 24);
+	anim.startPause = READ_LE_UINT32(data + 28);
 	uint32 imageLocation = READ_LE_UINT32(data + 32);
 
 	anim.sequence.resize(sequenceCount);
-	for (uint32 s = 0; s < sequenceCount; s++)
-		anim.sequence[s] = READ_LE_UINT32(data + 36 + s * 12);
+	for (uint32 s = 0; s < sequenceCount; s++) {
+		anim.sequence[s].imageIndex = READ_LE_UINT32(data + 36 + s * 12);
+		anim.sequence[s].soundCode = READ_LE_UINT32(data + 40 + s * 12);
+		anim.sequence[s].textCode = READ_LE_UINT32(data + 44 + s * 12);
+	}
 	delete[] data;
 
 	anim.frames = new byte[anim.frameSize * anim.imageCount];
@@ -234,6 +242,8 @@ bool Character::load(uint32 objectId) {
 			loadAnimResource(e, _talkBack);
 		else if (isAnimation && code >= kResTakeCrouch && code <= kResTakeAbove)
 			loadAnimResource(e, _takeAnims[code - kResTakeCrouch]);
+		else if (isAnimation && code >= kResIdleFirst && code < kResIdleFirst + 5)
+			loadAnimResource(e, _idleAnims[code - kResIdleFirst]);
 	}
 
 	if (!_staticFront.pixels) {
@@ -382,6 +392,11 @@ static int updatePos(Common::Point &pos, int stepX, int stepY, const Common::Poi
 }
 
 bool Character::walkTo(const World &world, Common::Point target) {
+	// A fresh walk cancels an interruptible idle fidget
+	if (_actionAnim && _actionInterruptible) {
+		_actionAnim = nullptr;
+		_actionStep = 0;
+	}
 	if (!world.hasWalkMap() || !_loaded)
 		return false;
 
@@ -495,6 +510,19 @@ bool Character::walkTo(const World &world, Common::Point target) {
 	return true;
 }
 
+void Character::takeInteractionPose(const World &world, const ObjectEntry &object) {
+	_walking = false;
+	_x = (int16)object.targetX;
+	_y = (int16)object.targetY;
+	_orient = object.targetOrientation;
+	if (object.targetLayer)
+		_layer = object.targetLayer;
+	int row = world.walkRowAt(Common::Point(_x, _y));
+	if (row >= 0)
+		_scale = world.mapScale(row);
+	selectIdle();
+}
+
 void Character::tick(uint32 millis, const World &world) {
 	// A scene animation replaces every other activity of the character
 	if (_sceneAnim.active) {
@@ -514,17 +542,32 @@ void Character::tick(uint32 millis, const World &world) {
 		return;
 	}
 
-	// One-shot gesture in progress (e.g. taking an object)
+	// One-shot gesture in progress (e.g. taking an object, or an
+	// idle fidget). Take gestures report their middle frame: the
+	// original posts the take event from there.
 	if (_actionAnim) {
 		if (!_actionStepTime)
 			_actionStepTime = millis + _actionAnim->framePeriod;
 		while (_actionAnim && millis >= _actionStepTime) {
 			_actionStepTime += _actionAnim->framePeriod ? _actionAnim->framePeriod : 100;
 			_actionStep++;
-			if (_actionStep >= _actionAnim->sequence.size() ||
-					_actionAnim->sequence[_actionStep] >= SequenceStep::kAutoDisable) {
+			uint32 imageIndex = (_actionStep < _actionAnim->sequence.size())
+				? _actionAnim->sequence[_actionStep].imageIndex : 0;
+			if (imageIndex == 0 || imageIndex >= SequenceStep::kAutoDisable) {
 				_actionAnim = nullptr;
 				_actionStep = 0;
+				_idleTime = 0;
+				break;
+			}
+			const SequenceStep &actionStep = _actionAnim->sequence[_actionStep];
+			if (actionStep.soundCode)
+				g_engine->sounds().playSound(actionStep.soundCode);
+			if (actionStep.textCode)
+				g_engine->logic().writer().showTextCode(actionStep.textCode);
+			if (!_actionInterruptible && !_actionHalfFired &&
+					_actionStep >= _actionAnim->sequence.size() / 2) {
+				_actionHalfFired = true;
+				g_engine->logic().onTakeGestureHalf();
 			}
 		}
 		return;
@@ -541,14 +584,37 @@ void Character::tick(uint32 millis, const World &world) {
 				_talkStepTime += anim.framePeriod ? anim.framePeriod : 100;
 				_talkStep++;
 				if (_talkStep >= anim.sequence.size() ||
-						anim.sequence[_talkStep] >= SequenceStep::kAutoDisable)
+						anim.sequence[_talkStep].imageIndex >= SequenceStep::kAutoDisable)
 					_talkStep = 0;
 			}
 		}
+		_idleTime = 0;
+		return;
 	}
 
-	if (!_walking)
+	if (!_walking) {
+		// After a while without doing anything the character fidgets:
+		// the original plays a random idle (glasses, blinks...) after
+		// the pause carried by the first idle animation
+		if (!_idleTime) {
+			_idleTime = millis + (_idleAnims[0].startPause
+				? _idleAnims[0].startPause : 7000);
+		} else if (millis >= _idleTime) {
+			_idleTime = 0;
+			uint pick = g_engine->getRandomNumber(4);
+			for (uint tries = 0; tries < 5 && !_idleAnims[pick].valid; tries++)
+				pick = (pick + 1) % 5;
+			if (_idleAnims[pick].valid) {
+				_actionAnim = &_idleAnims[pick];
+				_actionStep = 0;
+				_actionStepTime = 0;
+				_actionInterruptible = true;
+				_actionHalfFired = true;
+			}
+		}
 		return;
+	}
+	_idleTime = 0;
 	if (!_nextTick)
 		_nextTick = millis + kWalkTickMs;
 
@@ -568,18 +634,23 @@ void Character::tick(uint32 millis, const World &world) {
 		_layer = step.layer;
 		_scale = step.scale;
 		if (step.orient != _orient) {
+			// The walk cycle keeps its phase across a turn; only a
+			// start from standstill resets it (original SelectWalk use)
 			_orient = step.orient;
 			_currentAnim = selectWalkAnim(_orient);
-			_animStep = 0;
 		}
 
-		// One animation frame per walk tick
+		// One animation frame per walk tick, with its footstep sound
 		if (_currentAnim >= 0) {
 			const WalkAnim &anim = _walkAnims[_currentAnim];
 			_animStep++;
 			if (_animStep >= anim.sequence.size() ||
-					anim.sequence[_animStep] >= SequenceStep::kAutoDisable)
+					anim.sequence[_animStep].imageIndex >= SequenceStep::kAutoDisable)
 				_animStep = 0;
+			if (_animStep < anim.sequence.size() &&
+					anim.sequence[_animStep].soundCode)
+				g_engine->sounds().playSound(anim.sequence[_animStep].soundCode,
+					Audio::Mixer::kSFXSoundType);
 		}
 	}
 }
@@ -645,7 +716,7 @@ void Character::draw(Graphics::Screen *screen, const Common::Point &origin) cons
 	}
 
 	if (_actionAnim) {
-		uint32 imageIndex = _actionAnim->sequence.empty() ? 1 : _actionAnim->sequence[_actionStep];
+		uint32 imageIndex = _actionAnim->sequence.empty() ? 1 : _actionAnim->sequence[_actionStep].imageIndex;
 		if (imageIndex < 1 || imageIndex > _actionAnim->imageCount)
 			imageIndex = 1;
 		drawScaled(screen, _actionAnim->frames + (imageIndex - 1) * _actionAnim->frameSize,
@@ -655,7 +726,7 @@ void Character::draw(Graphics::Screen *screen, const Common::Point &origin) cons
 
 	if (_walking && _currentAnim >= 0) {
 		const WalkAnim &anim = _walkAnims[_currentAnim];
-		uint32 imageIndex = anim.sequence.empty() ? 1 : anim.sequence[_animStep];
+		uint32 imageIndex = anim.sequence.empty() ? 1 : anim.sequence[_animStep].imageIndex;
 		if (imageIndex < 1 || imageIndex > anim.imageCount)
 			imageIndex = 1;
 		drawScaled(screen, anim.frames + (imageIndex - 1) * anim.frameSize, anim.rect, origin);
@@ -666,7 +737,7 @@ void Character::draw(Graphics::Screen *screen, const Common::Point &origin) cons
 		const WalkAnim &anim = (_orient < kOrientEast || _orient > kOrientWest)
 			? _talkBack : _talkFront;
 		if (anim.valid) {
-			uint32 imageIndex = anim.sequence.empty() ? 1 : anim.sequence[_talkStep];
+			uint32 imageIndex = anim.sequence.empty() ? 1 : anim.sequence[_talkStep].imageIndex;
 			if (imageIndex < 1 || imageIndex > anim.imageCount)
 				imageIndex = 1;
 			drawScaled(screen, anim.frames + (imageIndex - 1) * anim.frameSize, anim.rect, origin);

@@ -178,6 +178,8 @@ bool Logic::isBusy() const {
 }
 
 void Logic::addToInventory(uint32 objectId) {
+	if (!_inventory.contains(objectId))
+		_inventoryOrder.push_back(objectId);
 	_inventory[objectId] = true;
 	setObjectEnabled(objectId, false);
 	debugC(kDebugActions, "Object %08x added to the inventory", objectId);
@@ -189,6 +191,12 @@ void Logic::removeFromInventory(uint32 objectId) {
 	if (!_inventory.contains(objectId))
 		return;
 	_inventory.erase(objectId);
+	for (uint i = 0; i < _inventoryOrder.size(); i++) {
+		if (_inventoryOrder[i] == objectId) {
+			_inventoryOrder.remove_at(i);
+			break;
+		}
+	}
 	if (g_engine->linkedObject() == objectId)
 		g_engine->linkObject(0);
 	debugC(kDebugActions, "Object %08x removed from the inventory", objectId);
@@ -206,20 +214,20 @@ void Logic::applyObjectStates() {
 
 void Logic::syncGame(Common::Serializer &s) {
 	// Inventory
-	uint32 count = _inventory.size();
+	uint32 count = _inventoryOrder.size();
 	s.syncAsUint32LE(count);
 	if (s.isLoading()) {
 		_inventory.clear();
+		_inventoryOrder.clear();
 		for (uint32 i = 0; i < count; i++) {
 			uint32 id = 0;
 			s.syncAsUint32LE(id);
 			_inventory[id] = true;
+			_inventoryOrder.push_back(id);
 		}
 	} else {
-		for (auto &entry : _inventory) {
-			uint32 id = entry._key;
-			s.syncAsUint32LE(id);
-		}
+		for (uint32 i = 0; i < count; i++)
+			s.syncAsUint32LE(_inventoryOrder[i]);
 	}
 
 	// Object enabled overrides
@@ -303,13 +311,9 @@ void Logic::interactWith(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 }
 
 void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
-	uint32 eventId = verbEvent(verb);
-	uint matched = dispatchEvent(eventId, objectId, linkedObjectId);
-
-	// Taking an object marked as takeable is built into the original
-	// engine; the rule tables only cover the special cases. The take
-	// gesture depends on the object flags, and the object reaches the
-	// inventory when the gesture ends.
+	// Taking a takeable object plays the gesture first; the take event
+	// and the pickup fire at HALF the animation, as the original posts
+	// the CogerYa from the gesture's middle frame
 	if (verb == kVerbTake) {
 		const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
 		if (object && (object->flags & ObjectEntry::kFlagTakeable)) {
@@ -321,12 +325,16 @@ void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 			if (!(object->flags & ObjectEntry::kFlagTakeDirect) &&
 					g_engine->master().playActionAnim(animCode)) {
 				_pendingTake = objectId;
-			} else {
-				addToInventory(objectId);
+				return;
 			}
+			dispatchEvent(kEventObjTakeNow, objectId, 0);
+			addToInventory(objectId);
 			return;
 		}
 	}
+
+	uint32 eventId = verbEvent(verb);
+	uint matched = dispatchEvent(eventId, objectId, linkedObjectId);
 
 	if (!matched) {
 		// No rule handled the verb: the original answers with a
@@ -411,7 +419,10 @@ void Logic::sayPhrase(uint32 textCode, uint32 soundCode) {
 		_phraseSound = soundCode;
 		g_engine->sounds().playSound(soundCode);
 	}
-	g_engine->master().setTalking(_writer.active());
+	// Speaking stops a walk outright, as the original kills every
+	// timer of the character when a phrase starts
+	g_engine->master().stopWalking();
+	g_engine->master().setTalking(true);
 }
 
 void Logic::update(uint32 millis) {
@@ -420,8 +431,13 @@ void Logic::update(uint32 millis) {
 	// greeting voice ends)
 	Common::Array<uint32> finishedSounds;
 	g_engine->sounds().pollFinishedSounds(finishedSounds);
-	for (uint i = 0; i < finishedSounds.size(); i++)
+	for (uint i = 0; i < finishedSounds.size(); i++) {
+		// A spoken phrase ends the moment its voice does, as the
+		// original clears on the pop-ended of the waited sound
+		if (finishedSounds[i] == _phraseSound && _writer.active())
+			_writer.expire();
 		dispatchEvent(kEventSoundPopEnded, finishedSounds[i], 0);
+	}
 
 	// A phrase with a voice stays on screen while its own voice plays
 	if (_phraseSound && g_engine->sounds().isSoundPlaying(_phraseSound))
@@ -432,23 +448,29 @@ void Logic::update(uint32 millis) {
 	if (phraseWasActive && !_writer.active())
 		onPhraseEnded();
 
-	// Fire the pending verb when the character arrives
+	// Fire the pending verb when the character arrives, first taking
+	// the object's interaction pose (orientation, layer and position
+	// snap of the original arrival handling)
 	if (_pendingActive && !g_engine->master().isWalking()) {
 		_pendingActive = false;
+		const ObjectEntry *object = g_engine->initialWorld().findObject(_pendingObject);
+		if (object && (object->targetX || object->targetY))
+			g_engine->master().takeInteractionPose(g_engine->world(), *object);
 		performVerb(_pendingObject, _pendingVerb, _pendingLinked);
 	}
 
-	// Complete a take once the gesture finishes
-	if (_pendingTake && !g_engine->master().isActionAnimating()) {
-		uint32 object = _pendingTake;
-		_pendingTake = 0;
-		addToInventory(object);
-	}
+	// Safety net: a gesture that ends without reaching its middle
+	// frame still completes the take
+	if (_pendingTake && !g_engine->master().isActionAnimating())
+		onTakeGestureHalf();
 
-	// Announce the end of a script-driven walk
+	// Announce the end of a script-driven walk; the character takes
+	// the orientation the walk request carried
 	if (_scriptedWalk && !g_engine->master().isWalking()) {
 		uint32 packed = _scriptedWalk;
 		_scriptedWalk = 0;
+		if (_scriptedWalkOrient)
+			g_engine->master().setOrientation((uint16)_scriptedWalkOrient);
 		dispatchEvent(kEventObjArrived, packed, 0);
 	}
 }
@@ -635,10 +657,14 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 		// arrival is announced with the same packed parameter
 		Common::Point target((int16)(param2 & 0xffff), (int16)(param2 >> 16));
 		debugC(kDebugActions, "Scripted walk to (%d,%d) orient %u", target.x, target.y, param3);
-		if (g_engine->master().walkTo(g_engine->world(), target))
+		if (g_engine->master().walkTo(g_engine->world(), target)) {
 			_scriptedWalk = param2;
-		else
+			_scriptedWalkOrient = param3;
+		} else {
+			if (param3)
+				g_engine->master().setOrientation((uint16)param3);
 			dispatchEvent(kEventObjArrived, param2, 0);
+		}
 		break;
 	}
 	case kEventTextClean:
@@ -731,6 +757,17 @@ void Logic::onPhraseEnded() {
 		else
 			showDialogList();
 	}
+}
+
+// Called from the take gesture's middle frame: the take event and
+// the built-in pickup run there, halfway through the crouch
+void Logic::onTakeGestureHalf() {
+	if (!_pendingTake)
+		return;
+	uint32 object = _pendingTake;
+	_pendingTake = 0;
+	dispatchEvent(kEventObjTakeNow, object, 0);
+	addToInventory(object);
 }
 
 void Logic::onAnimationEnded(uint32 resId) {

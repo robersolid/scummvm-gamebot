@@ -523,9 +523,14 @@ const InventoryUI::ItemImages *InventoryUI::itemImages(uint32 objectId) {
 }
 
 Common::Array<uint32> InventoryUI::itemsInOrder() const {
+	// Insertion order, skipping the object hanging from the cursor
+	// (the original extracts it from the bag while it is carried)
 	Common::Array<uint32> items;
-	for (auto &entry : g_engine->logic().inventory())
-		items.push_back(entry._key);
+	const Common::Array<uint32> &order = g_engine->logic().inventoryOrder();
+	for (uint i = 0; i < order.size(); i++) {
+		if (order[i] != g_engine->linkedObject())
+			items.push_back(order[i]);
+	}
 	return items;
 }
 
@@ -536,7 +541,7 @@ int InventoryUI::slotAt(const Common::Point &screenPos) const {
 			screenPos.x >= kAreaRight || screenPos.y >= kAreaBottom)
 		return -1;
 	int perRow = 1;
-	while ((kSlotWidth * (perRow + 1) + kSeparationX * perRow) <= (kAreaRight - kAreaLeft))
+	while ((kSlotWidth * (perRow + 1) + kSeparationX * perRow) <= (kAreaRight - kAreaLeft + 1))
 		perRow++;
 	int column = (screenPos.x - kAreaLeft) / (kSlotWidth + kSeparationX);
 	int row = (screenPos.y - kAreaTop) / (kSlotHeight + kSeparationY);
@@ -582,14 +587,18 @@ void InventoryUI::draw(Graphics::Screen *screen) {
 
 	Common::Array<uint32> items = itemsInOrder();
 	int perRow = 1;
-	while ((kSlotWidth * (perRow + 1) + kSeparationX * perRow) <= (kAreaRight - kAreaLeft))
+	while ((kSlotWidth * (perRow + 1) + kSeparationX * perRow) <= (kAreaRight - kAreaLeft + 1))
 		perRow++;
 	for (uint i = 0; i < items.size(); i++) {
 		const ItemImages *images = itemImages(items[i]);
 		if (!images)
 			continue;
-		int16 x = kAreaLeft + (int16)(i % perRow) * (kSlotWidth + kSeparationX);
-		int16 y = kAreaTop + (int16)(i / perRow) * (kSlotHeight + kSeparationY);
+		// Item art centers inside its 80x46 slot, as the original
+		// draws around the slot's middle point
+		int16 x = kAreaLeft + (int16)(i % perRow) * (kSlotWidth + kSeparationX)
+			+ (kSlotWidth - images->rect.width()) / 2;
+		int16 y = kAreaTop + (int16)(i / perRow) * (kSlotHeight + kSeparationY)
+			+ (kSlotHeight - images->rect.height()) / 2;
 		const byte *pixels = (items[i] == _hoverObject) ? images->highlight : images->normal;
 		blitImage(screen, pixels, x, y, images->rect.width(), images->rect.height());
 	}
