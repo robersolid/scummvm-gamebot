@@ -36,9 +36,11 @@ namespace Gamebot {
 
 static const byte kTransparentColor = 0;
 
-// Verb palette resources (original ResSelectMortaNormal/FileNormal)
+// Verb palette resources (original ResSelectMorta/File Normal/Super)
 static const uint32 kPaletteResId = 0x00031001;
 static const uint32 kPaletteResIdFilemon = 0x00031002;
+static const uint32 kPaletteResIdMortaSuper = 0x00032001;
+static const uint32 kPaletteResIdFilemonSuper = 0x00032002;
 // Mouse mode action codes carried by the palette icons
 enum {
 	kModePickup = 0x00010000,
@@ -63,7 +65,7 @@ static void blitImage(Graphics::Screen *screen, const byte *pixels,
 }
 
 VerbPalette::~VerbPalette() {
-	for (uint s = 0; s < 2; s++) {
+	for (uint s = 0; s < 4; s++) {
 		delete[] _sets[s].background.pixels;
 		for (uint i = 0; i < 4; i++)
 			delete[] _sets[s].icons[i].pixels;
@@ -110,12 +112,17 @@ bool VerbPalette::loadSet(uint32 resId, Set &set) {
 }
 
 // The palette design of the character under control (the original
-// posts evMouseActionPalette with the master's select image)
+// posts evMouseActionPalette with the master's select image); when
+// the agent works alone the phase uses the Super variant
 const VerbPalette::Set &VerbPalette::activeSet() const {
-	if (_sets[1].background.pixels &&
-			g_engine->master().objectId() != kCharMortadelo)
-		return _sets[1];
-	return _sets[0];
+	uint index = (g_engine->master().objectId() == kCharFilemon) ? 1 : 0;
+	if (!g_engine->secondCharacter() && _sets[index + 2].background.pixels)
+		index += 2;
+	if (!_sets[index].background.pixels)
+		index &= 1;
+	if (!_sets[index].background.pixels)
+		index = 0;
+	return _sets[index];
 }
 
 bool VerbPalette::load() {
@@ -124,6 +131,8 @@ bool VerbPalette::load() {
 		return false;
 	}
 	loadSet(kPaletteResIdFilemon, _sets[1]);
+	loadSet(kPaletteResIdMortaSuper, _sets[2]);
+	loadSet(kPaletteResIdFilemonSuper, _sets[3]);
 	_loaded = true;
 	debugC(kDebugResources, "Verb palettes loaded (%dx%d)",
 		_sets[0].background.rect.width(), _sets[0].background.rect.height());
@@ -318,30 +327,35 @@ void MainMenu::draw(Graphics::Screen *screen) const {
 static const uint32 kChangerObjectId = 0x15;
 static const uint32 kFaceMortadelo = 0x00150101;
 static const uint32 kFaceFilemon = 0x00150102;
+static const uint32 kFaceMortadeloGray = 0x00150103;
+static const uint32 kFaceFilemonGray = 0x00150104;
 static const uint32 kSpinToFilemon = 0x00150501;
 static const uint32 kSpinToMortadelo = 0x00150502;
 
 ChangerBadge::~ChangerBadge() {
-	for (uint i = 0; i < 2; i++) {
+	for (uint i = 0; i < 4; i++)
 		delete[] _faces[i].pixels;
+	for (uint i = 0; i < 2; i++)
 		delete[] _spins[i].frames;
-	}
 }
 
 bool ChangerBadge::load() {
 	ResourceFile &res = g_engine->resources();
-	static const uint32 kFaceIds[2] = { kFaceMortadelo, kFaceFilemon };
+	static const uint32 kFaceIds[4] = { kFaceMortadelo, kFaceFilemon,
+		kFaceMortadeloGray, kFaceFilemonGray };
 	static const uint32 kSpinIds[2] = { kSpinToMortadelo, kSpinToFilemon };
 
-	for (uint i = 0; i < 2; i++) {
+	for (uint i = 0; i < 4; i++) {
 		const ResourceEntry *e = res.findByResId(kFaceIds[i]);
 		byte *data = e ? res.readBlob(*e) : nullptr;
 		if (!data)
-			return false;
+			return i >= 2; // the gray pair is optional
 		_faces[i].pixels = new byte[kBadgeWidth * kBadgeHeight];
 		memcpy(_faces[i].pixels, data + 16, kBadgeWidth * kBadgeHeight);
 		delete[] data;
 
+		if (i >= 2)
+			continue;
 		e = res.findByResId(kSpinIds[i]);
 		data = e ? res.readBlob(*e) : nullptr;
 		if (!data)
@@ -415,8 +429,18 @@ void ChangerBadge::update(uint32 millis) {
 }
 
 void ChangerBadge::draw(Graphics::Screen *screen) {
-	if (!_loaded || !g_engine->secondCharacter())
+	if (!_loaded || g_engine->master().objectId() == kCharBoth)
 		return;
+
+	// Without a partner in the phase the badge shows the grayed face
+	// (the original cmFixed entries), taking no clicks
+	if (!g_engine->secondCharacter()) {
+		uint facing = (g_engine->master().objectId() == kCharMortadelo) ? 3 : 2;
+		if (_faces[facing].pixels)
+			blitImage(screen, _faces[facing].pixels, badgeX(), 0,
+				kBadgeWidth, kBadgeHeight);
+		return;
+	}
 
 	const byte *pixels;
 	if (_spinning) {

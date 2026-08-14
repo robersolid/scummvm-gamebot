@@ -457,11 +457,17 @@ bool GamebotEngine::gotoPhase(uint32 phaseId) {
 			character->visible = true;
 			character->enterPhase(_world, location);
 		}
-		// The combined character rules the map screens; otherwise
-		// keep the current master if present, defaulting to Mortadelo
-		if (_both.visible)
+		// The phase data appoints the master: the original PostChange
+		// posts a set-master with the first character entry
+		Character *first =
+			(phase.chars[0].characterId == _mortadelo.objectId()) ? &_mortadelo :
+			(phase.chars[0].characterId == _filemon.objectId()) ? &_filemon :
+			(phase.chars[0].characterId == _both.objectId()) ? &_both : nullptr;
+		if (first && first->visible)
+			_master = first;
+		else if (_both.visible)
 			_master = &_both;
-		else if (_mortadelo.visible && (_master == &_both || !_master->visible))
+		else if (!_master->visible && _mortadelo.visible)
 			_master = &_mortadelo;
 		else if (!_master->visible && _filemon.visible)
 			_master = &_filemon;

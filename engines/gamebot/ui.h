@@ -74,7 +74,7 @@ private:
 	bool loadSet(uint32 resId, Set &set);
 	const Set &activeSet() const;
 
-	Set _sets[2]; // Mortadelo, Filemon
+	Set _sets[4]; // Mortadelo, Filemon, and their Super variants
 	bool _loaded = false;
 	bool _open = false;
 	Common::Point _pos;         // top-left of the palette on screen
@@ -156,7 +156,7 @@ private:
 
 	int16 badgeX() const; // badge lives at the top-right corner
 
-	Face _faces[2];  // 0 = Mortadelo, 1 = Filemon
+	Face _faces[4];  // Mortadelo, Filemon, and their grayed variants
 	Spin _spins[2];
 	bool _loaded = false;
 
