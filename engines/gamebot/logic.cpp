@@ -844,6 +844,26 @@ void Logic::pickSentence(uint index) {
 
 // Sentence list at the bottom of the screen, one line per active
 // sentence; the original renders them in the dialog font colors
+// Trims a line to the available width appending an ellipsis, as the
+// original ReduceStr does when a sentence does not fit the screen
+static Common::U32String reduceStr(const Graphics::Font *font,
+		const Common::U32String &text, int maxWidth) {
+	if (font->getStringWidth(text) <= maxWidth)
+		return text;
+	const Common::U32String dots("...");
+	const int dotsWidth = font->getStringWidth(dots);
+	Common::U32String out;
+	int width = 0;
+	for (uint i = 0; i < text.size(); i++) {
+		int charWidth = font->getCharWidth(text[i]);
+		if (width + charWidth > maxWidth - dotsWidth)
+			break;
+		out += text[i];
+		width += charWidth;
+	}
+	return out + dots;
+}
+
 void Logic::drawDialog(Graphics::Screen *screen) const {
 	if (!_dialogOpen)
 		return;
@@ -872,6 +892,7 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 			continue;
 		Common::U32String text(Common::String((const char *)data, e->size), Common::kISO8859_1);
 		delete[] data;
+		text = reduceStr(font, text, screen->w - 20);
 		font->drawString(screen, text, 11, y + 1, screen->w - 20, dark);
 		font->drawString(screen, text, 10, y, screen->w - 20,
 			((int)i == hovered) ? hot : bright);
