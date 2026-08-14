@@ -208,6 +208,63 @@ private:
 	uint32 _hoverObject = 0;
 };
 
+// The load, save and options screens of the original OptionsMaster:
+// full-screen panels over the main menu with three-state buttons, ten
+// save slot lines showing the save dates, and six-level volume bars
+class OptionsPanels {
+public:
+	enum Panel { kPanelNone, kPanelLoad, kPanelSave, kPanelOptions };
+
+	~OptionsPanels();
+
+	void open(Panel panel);
+	void close() { _panel = kPanelNone; }
+	bool isOpen() const { return _panel != kPanelNone; }
+
+	void updateHover(const Common::Point &screenPos);
+	// Returns true when the click closed the whole menu (a game load)
+	bool handleClick(const Common::Point &screenPos);
+	void draw(Graphics::Screen *screen);
+
+private:
+	struct Image {
+		Common::Rect rect;
+		byte *pixels = nullptr;
+	};
+	struct Button {
+		Image states[3]; // normal, hot, pressed
+	};
+
+	static const uint kSlotCount = 10;
+	static const uint kBarLevels = 6;
+
+	bool load();
+	bool loadImage(uint32 objectId, uint imageIndex, Image &image) const;
+	void loadButton(uint32 objectId, Button &button) const;
+	void refreshSaves();
+	void drawButton(Graphics::Screen *screen, const Button &button, bool hot) const;
+	int hitImage(const Common::Point &screenPos, const Image &image) const;
+	int volumeLevel(uint bar) const;
+	void setVolumeLevel(uint bar, int level);
+
+	bool _loaded = false;
+	Panel _panel = kPanelNone;
+
+	Image _loadBg, _saveBg, _optionsBg;
+	Button _loadAction, _loadBack;
+	Button _saveAction, _saveBack;
+	Image _loadSlots[kSlotCount]; // marked-line image per slot
+	Image _saveSlots[kSlotCount];
+	Image _bars[3][kBarLevels];   // effects, music, voices
+	Button _barMore[3], _barLess[3];
+	Button _optionsBack;
+
+	int _marked = -1;             // marked save slot line
+	int _hover = -1;              // hovered button (panel-local index)
+	Common::String _slotText[kSlotCount]; // save dates
+	bool _slotUsed[kSlotCount] = {};
+};
+
 } // End of namespace Gamebot
 
 #endif // GAMEBOT_UI_H

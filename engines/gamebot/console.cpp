@@ -97,6 +97,7 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("loadslot", WRAP_METHOD(Console, cmdSaveSlot));
 	registerCmd("master", WRAP_METHOD(Console, cmdMaster));
 	registerCmd("weather", WRAP_METHOD(Console, cmdWeather));
+	registerCmd("menu", WRAP_METHOD(Console, cmdMenu));
 	registerCmd("exitgame", WRAP_METHOD(Console, cmdExitGame));
 }
 
@@ -104,6 +105,21 @@ Console::Console() : GUI::Debugger() {
 // external timeout
 bool Console::cmdExitGame(int argc, const char **argv) {
 	g_engine->quitGame();
+	return true;
+}
+
+bool Console::cmdMenu(int argc, const char **argv) {
+	g_engine->mainMenu().open();
+	if (argc > 1) {
+		OptionsPanels::Panel panel = OptionsPanels::kPanelNone;
+		if (!strcmp(argv[1], "load"))
+			panel = OptionsPanels::kPanelLoad;
+		else if (!strcmp(argv[1], "save"))
+			panel = OptionsPanels::kPanelSave;
+		else if (!strcmp(argv[1], "opts"))
+			panel = OptionsPanels::kPanelOptions;
+		g_engine->optionsPanels().open(panel);
+	}
 	return true;
 }
 
@@ -410,6 +426,7 @@ bool Console::cmdWait(int argc, const char **argv) {
 		g_engine->verbPalette().draw(g_engine->_screen);
 		g_engine->inventoryUI().draw(g_engine->_screen);
 		g_engine->mainMenu().draw(g_engine->_screen);
+	g_engine->optionsPanels().draw(g_engine->_screen);
 		g_engine->_screen->update();
 		g_system->delayMillis(10);
 	}
@@ -841,6 +858,7 @@ bool Console::cmdScreenshot(int argc, const char **argv) {
 	g_engine->verbPalette().draw(g_engine->_screen);
 	g_engine->inventoryUI().draw(g_engine->_screen);
 	g_engine->mainMenu().draw(g_engine->_screen);
+	g_engine->optionsPanels().draw(g_engine->_screen);
 	byte palette[256 * 3];
 	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
 

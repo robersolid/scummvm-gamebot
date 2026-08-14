@@ -71,6 +71,7 @@ private:
 	InventoryUI _inventoryUI;   // the safe with the collected objects
 	ChangerBadge _changerBadge; // the character-switch medallion
 	MainMenu _mainMenu;         // the original main menu panel
+	OptionsPanels _optionsPanels; // load/save/options screens
 	SoundManager _sounds;       // ADPCM voices, effects and music
 	Common::Point _lastMousePhasePos; // for the in-bounds conditions
 	Common::String _hoverName;        // interactable name under the cursor
@@ -144,6 +145,8 @@ public:
 	InventoryUI &inventoryUI() { return _inventoryUI; }
 	ChangerBadge &changerBadge() { return _changerBadge; }
 	MainMenu &mainMenu() { return _mainMenu; }
+	OptionsPanels &optionsPanels() { return _optionsPanels; }
+	const Common::String &targetName() const { return _targetName; }
 	SoundManager &sounds() { return _sounds; }
 	const Common::Point &lastMousePhasePos() const { return _lastMousePhasePos; }
 	void drawHoverName(Graphics::Screen *screen) const;

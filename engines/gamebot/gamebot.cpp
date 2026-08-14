@@ -89,7 +89,10 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 	_lastMousePhasePos = Common::Point(
 		screenPos.x + _world.origin().x, screenPos.y + _world.origin().y);
 	if (_mainMenu.isOpen()) {
-		_mainMenu.updateHover(screenPos);
+		if (_optionsPanels.isOpen())
+			_optionsPanels.updateHover(screenPos);
+		else
+			_mainMenu.updateHover(screenPos);
 		return;
 	}
 	if (_inventoryUI.isOpen()) {
@@ -158,15 +161,10 @@ void GamebotEngine::runMenuAction(int action) {
 		_logic.resetGame();
 		break;
 	case MainMenu::kActionLoad:
-		_mainMenu.close();
-		if (loadGameDialog())
-			break;
-		_mainMenu.open();
+		_optionsPanels.open(OptionsPanels::kPanelLoad);
 		break;
 	case MainMenu::kActionSave:
-		_mainMenu.close();
-		saveGameDialog();
-		_mainMenu.open();
+		_optionsPanels.open(OptionsPanels::kPanelSave);
 		break;
 	case MainMenu::kActionCredits:
 		// The credits are a phase whose video ends by asking for the
@@ -175,7 +173,7 @@ void GamebotEngine::runMenuAction(int action) {
 		gotoPhase(0x71);
 		break;
 	case MainMenu::kActionOptions:
-		openMainMenuDialog();
+		_optionsPanels.open(OptionsPanels::kPanelOptions);
 		break;
 	case MainMenu::kActionQuit:
 		quitGame();
@@ -186,8 +184,14 @@ void GamebotEngine::runMenuAction(int action) {
 }
 
 void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
-	// The main menu is modal above everything
+	// The main menu is modal above everything; its load, save and
+	// options panels come first
 	if (_mainMenu.isOpen()) {
+		if (_optionsPanels.isOpen()) {
+			if (_optionsPanels.handleClick(screenPos))
+				_mainMenu.close(); // a game was loaded
+			return;
+		}
 		runMenuAction(_mainMenu.handleClick(screenPos));
 		return;
 	}
@@ -571,7 +575,9 @@ Common::Error GamebotEngine::run() {
 				else if (e.kbd.keycode == Common::KEYCODE_TAB && !_logic.isBusy())
 					switchMaster();
 				else if (e.kbd.keycode == Common::KEYCODE_ESCAPE) {
-					if (_mainMenu.isOpen())
+					if (_optionsPanels.isOpen())
+						_optionsPanels.close();
+					else if (_mainMenu.isOpen())
 						_mainMenu.close();
 					else
 						_mainMenu.open();
@@ -624,6 +630,7 @@ Common::Error GamebotEngine::run() {
 		_verbPalette.draw(_screen);
 		_inventoryUI.draw(_screen);
 		_mainMenu.draw(_screen);
+		_optionsPanels.draw(_screen);
 		limiter.delayBeforeSwap();
 		_screen->update();
 		limiter.startFrame();

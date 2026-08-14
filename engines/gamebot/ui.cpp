@@ -19,9 +19,12 @@
  *
  */
 
+#include "common/config-manager.h"
 #include "common/debug.h"
 #include "common/endian.h"
 #include "common/system.h"
+#include "engines/metaengine.h"
+#include "graphics/font.h"
 #include "graphics/paletteman.h"
 #include "graphics/screen.h"
 
@@ -549,6 +552,300 @@ void InventoryUI::draw(Graphics::Screen *screen) {
 		const byte *pixels = (items[i] == _hoverObject) ? images->highlight : images->normal;
 		blitImage(screen, pixels, x, y, images->rect.width(), images->rect.height());
 	}
+}
+
+// Object codes of the panels (original MainClass.h OptObj* defines)
+enum {
+	kOptLoadPanel = 0xc100,
+	kOptLoadButton = 0xc101,
+	kOptLoadBack = 0xc102,
+	kOptLoadEntry = 0xc103,
+	kOptSavePanel = 0xc200,
+	kOptSaveButton = 0xc201,
+	kOptSaveBack = 0xc202,
+	kOptSaveEntry = 0xc203,
+	kOptOptionsPanel = 0xc300,
+	kOptBarFirst = 0xc301,       // effects, music, voices
+	kOptBarButtonFirst = 0xc304, // more/less pairs per bar
+	kOptOptionsBack = 0xc30C,
+	kOptClickSound = 0x151001
+};
+
+// ScummVM volume keys matched to the three bars
+static const char *kVolumeKeys[3] = { "sfx_volume", "music_volume", "speech_volume" };
+
+OptionsPanels::~OptionsPanels() {
+	delete[] _loadBg.pixels;
+	delete[] _saveBg.pixels;
+	delete[] _optionsBg.pixels;
+	for (uint i = 0; i < kSlotCount; i++) {
+		delete[] _loadSlots[i].pixels;
+		delete[] _saveSlots[i].pixels;
+	}
+	for (uint b = 0; b < 3; b++) {
+		for (uint l = 0; l < kBarLevels; l++)
+			delete[] _bars[b][l].pixels;
+		for (uint st = 0; st < 3; st++) {
+			delete[] _barMore[b].states[st].pixels;
+			delete[] _barLess[b].states[st].pixels;
+		}
+	}
+	for (uint st = 0; st < 3; st++) {
+		delete[] _loadAction.states[st].pixels;
+		delete[] _loadBack.states[st].pixels;
+		delete[] _saveAction.states[st].pixels;
+		delete[] _saveBack.states[st].pixels;
+		delete[] _optionsBack.states[st].pixels;
+	}
+}
+
+bool OptionsPanels::loadImage(uint32 objectId, uint imageIndex, Image &image) const {
+	ResourceFile &res = g_engine->resources();
+	int i = res.findObject(objectId);
+	uint seen = 0;
+	for (; i >= 0 && i < (int)res.count() && res.entry(i).objectId == objectId; i++) {
+		if (res.entry(i).type != kResImage || seen++ != imageIndex)
+			continue;
+		byte *data = res.readBlob(res.entry(i));
+		if (!data)
+			return false;
+		image.rect = Common::Rect(
+			READ_LE_INT32(data), READ_LE_INT32(data + 4),
+			READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+		image.pixels = new byte[image.rect.width() * image.rect.height()];
+		memcpy(image.pixels, data + 16, image.rect.width() * image.rect.height());
+		delete[] data;
+		return true;
+	}
+	return false;
+}
+
+void OptionsPanels::loadButton(uint32 objectId, Button &button) const {
+	for (uint st = 0; st < 3; st++)
+		loadImage(objectId, st, button.states[st]);
+}
+
+bool OptionsPanels::load() {
+	if (!loadImage(kOptLoadPanel, 0, _loadBg) ||
+			!loadImage(kOptSavePanel, 0, _saveBg) ||
+			!loadImage(kOptOptionsPanel, 0, _optionsBg))
+		return false;
+	loadButton(kOptLoadButton, _loadAction);
+	loadButton(kOptLoadBack, _loadBack);
+	loadButton(kOptSaveButton, _saveAction);
+	loadButton(kOptSaveBack, _saveBack);
+	loadButton(kOptOptionsBack, _optionsBack);
+	for (uint i = 0; i < kSlotCount; i++) {
+		loadImage(kOptLoadEntry + i, 0, _loadSlots[i]);
+		loadImage(kOptSaveEntry + i, 0, _saveSlots[i]);
+	}
+	for (uint b = 0; b < 3; b++) {
+		for (uint l = 0; l < kBarLevels; l++)
+			loadImage(kOptBarFirst + b, l, _bars[b][l]);
+		loadButton(kOptBarButtonFirst + b * 2, _barMore[b]);
+		loadButton(kOptBarButtonFirst + b * 2 + 1, _barLess[b]);
+	}
+	_loaded = true;
+	return true;
+}
+
+// The save dates come from the existing ScummVM saves of slots 1-10
+void OptionsPanels::refreshSaves() {
+	for (uint i = 0; i < kSlotCount; i++) {
+		_slotText[i].clear();
+		_slotUsed[i] = false;
+	}
+	SaveStateList saves = g_engine->getMetaEngine()->listSaves(
+		g_engine->targetName().c_str());
+	for (uint i = 0; i < saves.size(); i++) {
+		int slot = saves[i].getSaveSlot() - 1;
+		if (slot < 0 || slot >= (int)kSlotCount)
+			continue;
+		_slotUsed[slot] = true;
+		_slotText[slot] = saves[i].getDescription();
+	}
+}
+
+void OptionsPanels::open(Panel panel) {
+	if (!_loaded && !load())
+		return;
+	if (panel == kPanelLoad || panel == kPanelSave)
+		refreshSaves();
+	_marked = -1;
+	_hover = -1;
+	_panel = panel;
+}
+
+int OptionsPanels::hitImage(const Common::Point &screenPos, const Image &image) const {
+	if (!image.pixels || !image.rect.contains(screenPos))
+		return -1;
+	byte pixel = image.pixels[
+		(screenPos.y - image.rect.top) * image.rect.width() +
+		(screenPos.x - image.rect.left)];
+	return (pixel != kTransparentColor) ? 1 : -1;
+}
+
+int OptionsPanels::volumeLevel(uint bar) const {
+	int volume = ConfMan.getInt(kVolumeKeys[bar]);
+	return CLIP(volume * (int)kBarLevels / 256, 0, (int)kBarLevels - 1);
+}
+
+void OptionsPanels::setVolumeLevel(uint bar, int level) {
+	level = CLIP(level, 0, (int)kBarLevels - 1);
+	ConfMan.setInt(kVolumeKeys[bar], level * 255 / ((int)kBarLevels - 1));
+	g_engine->syncSoundSettings();
+}
+
+void OptionsPanels::updateHover(const Common::Point &screenPos) {
+	_hover = -1;
+	if (_panel == kPanelLoad) {
+		if (hitImage(screenPos, _loadAction.states[0]) > 0)
+			_hover = 0;
+		else if (hitImage(screenPos, _loadBack.states[0]) > 0)
+			_hover = 1;
+	} else if (_panel == kPanelSave) {
+		if (hitImage(screenPos, _saveAction.states[0]) > 0)
+			_hover = 0;
+		else if (hitImage(screenPos, _saveBack.states[0]) > 0)
+			_hover = 1;
+	} else if (_panel == kPanelOptions) {
+		if (hitImage(screenPos, _optionsBack.states[0]) > 0)
+			_hover = 1;
+		for (uint b = 0; b < 3; b++) {
+			if (hitImage(screenPos, _barMore[b].states[0]) > 0)
+				_hover = 10 + (int)b * 2;
+			else if (hitImage(screenPos, _barLess[b].states[0]) > 0)
+				_hover = 10 + (int)b * 2 + 1;
+		}
+	}
+}
+
+bool OptionsPanels::handleClick(const Common::Point &screenPos) {
+	SoundManager &sounds = g_engine->sounds();
+	if (_panel == kPanelLoad || _panel == kPanelSave) {
+		const Image *slots = (_panel == kPanelLoad) ? _loadSlots : _saveSlots;
+		for (uint i = 0; i < kSlotCount; i++) {
+			if (slots[i].rect.contains(screenPos)) {
+				_marked = (int)i;
+				return false;
+			}
+		}
+		const Button &action = (_panel == kPanelLoad) ? _loadAction : _saveAction;
+		const Button &back = (_panel == kPanelLoad) ? _loadBack : _saveBack;
+		if (hitImage(screenPos, action.states[0]) > 0) {
+			sounds.playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
+			if (_marked < 0)
+				return false;
+			if (_panel == kPanelLoad) {
+				if (!_slotUsed[_marked])
+					return false;
+				if (g_engine->loadGameState(_marked + 1).getCode() == Common::kNoError) {
+					close();
+					return true; // the whole menu closes
+				}
+				return false;
+			}
+			// Saving stamps the current date as the slot text
+			TimeDate td;
+			g_system->getTimeAndDate(td);
+			Common::String desc = Common::String::format(
+				"%02d/%02d/%04d %02d:%02d", td.tm_mday, td.tm_mon + 1,
+				td.tm_year + 1900, td.tm_hour, td.tm_min);
+			g_engine->saveGameState(_marked + 1, desc);
+			refreshSaves();
+			return false;
+		}
+		if (hitImage(screenPos, back.states[0]) > 0) {
+			sounds.playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
+			close();
+		}
+		return false;
+	}
+
+	if (_panel == kPanelOptions) {
+		for (uint b = 0; b < 3; b++) {
+			if (hitImage(screenPos, _barMore[b].states[0]) > 0) {
+				sounds.playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
+				setVolumeLevel(b, volumeLevel(b) + 1);
+				return false;
+			}
+			if (hitImage(screenPos, _barLess[b].states[0]) > 0) {
+				sounds.playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
+				setVolumeLevel(b, volumeLevel(b) - 1);
+				return false;
+			}
+		}
+		if (hitImage(screenPos, _optionsBack.states[0]) > 0) {
+			sounds.playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
+			close();
+		}
+	}
+	return false;
+}
+
+void OptionsPanels::drawButton(Graphics::Screen *screen, const Button &button,
+		bool hot) const {
+	const Image &image = (hot && button.states[1].pixels)
+		? button.states[1] : button.states[0];
+	if (image.pixels)
+		blitImage(screen, image.pixels, image.rect.left, image.rect.top,
+			image.rect.width(), image.rect.height());
+}
+
+void OptionsPanels::draw(Graphics::Screen *screen) {
+	if (_panel == kPanelNone)
+		return;
+
+	if (_panel == kPanelOptions) {
+		blitImage(screen, _optionsBg.pixels, 0, 0,
+			_optionsBg.rect.width(), _optionsBg.rect.height());
+		for (uint b = 0; b < 3; b++) {
+			const Image &bar = _bars[b][volumeLevel(b)];
+			if (bar.pixels)
+				blitImage(screen, bar.pixels, bar.rect.left, bar.rect.top,
+					bar.rect.width(), bar.rect.height());
+			drawButton(screen, _barMore[b], _hover == 10 + (int)b * 2);
+			drawButton(screen, _barLess[b], _hover == 10 + (int)b * 2 + 1);
+		}
+		drawButton(screen, _optionsBack, _hover == 1);
+		return;
+	}
+
+	const Image &bg = (_panel == kPanelLoad) ? _loadBg : _saveBg;
+	const Image *slots = (_panel == kPanelLoad) ? _loadSlots : _saveSlots;
+	blitImage(screen, bg.pixels, 0, 0, bg.rect.width(), bg.rect.height());
+
+	const Graphics::Font *font = TextWriter::dialogFont();
+	for (uint i = 0; i < kSlotCount; i++) {
+		const Image &line = slots[i];
+		if ((int)i == _marked && line.pixels)
+			blitImage(screen, line.pixels, line.rect.left, line.rect.top,
+				line.rect.width(), line.rect.height());
+		if (font && !_slotText[i].empty()) {
+			// The original prints the save date centered in the line,
+			// in the yellow options color
+			byte color = 255;
+			byte palette[256 * 3];
+			g_system->getPaletteManager()->grabPalette(palette, 0, 256);
+			uint32 best = 0xffffffff;
+			for (uint c = 0; c < 256; c++) {
+				int dr = (int)palette[c * 3] - 255;
+				int dg = (int)palette[c * 3 + 1] - 255;
+				int db = (int)palette[c * 3 + 2] - 5;
+				uint32 dist = (uint32)(dr * dr + dg * dg + db * db);
+				if (dist < best) {
+					best = dist;
+					color = (byte)c;
+				}
+			}
+			Common::U32String text(_slotText[i], Common::kISO8859_1);
+			font->drawString(screen, text, line.rect.left, line.rect.top + 1,
+				line.rect.width(), color, Graphics::kTextAlignCenter);
+		}
+	}
+
+	drawButton(screen, (_panel == kPanelLoad) ? _loadAction : _saveAction, _hover == 0);
+	drawButton(screen, (_panel == kPanelLoad) ? _loadBack : _saveBack, _hover == 1);
 }
 
 } // End of namespace Gamebot
