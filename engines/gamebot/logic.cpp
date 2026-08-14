@@ -809,6 +809,12 @@ void Logic::showDialogList() {
 		endDialog();
 		return;
 	}
+	// The original shuffles the sentence list on every opening (its
+	// ReorderBag sorts the entries by a fresh rand() key)
+	for (uint i = _visibleSentences.size() - 1; i > 0; i--) {
+		uint j = g_engine->getRandomNumber(i);
+		SWAP(_visibleSentences[i], _visibleSentences[j]);
+	}
 	_dialogOpen = true;
 	debugC(kDebugActions, "Dialog %08x offers %u sentences",
 		_currentDialog, _visibleSentences.size());
@@ -891,7 +897,7 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 	byte hot = findNearestColor(255, 120, 0);
 	byte dark = findNearestColor(5, 5, 5);
 
-	const int lineHeight = font->getFontHeight() + 2;
+	const int lineHeight = 22; // WrChunkSize
 	int top = screen->h - (int)_visibleSentences.size() * lineHeight - 4;
 	// The sentence under the cursor highlights in the hot color
 	Common::Point mouse = g_system->getEventManager()->getMousePos();
@@ -907,9 +913,9 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 			continue;
 		Common::U32String text(Common::String((const char *)data, e->size), Common::kISO8859_1);
 		delete[] data;
-		text = reduceStr(font, text, screen->w - 20);
-		font->drawString(screen, text, 11, y + 1, screen->w - 20, dark);
-		font->drawString(screen, text, 10, y, screen->w - 20,
+		text = reduceStr(font, text, screen->w - 8);
+		font->drawString(screen, text, 5, y + 1, screen->w - 8, dark);
+		font->drawString(screen, text, 4, y, screen->w - 8,
 			((int)i == hovered) ? hot : bright);
 	}
 }
@@ -917,8 +923,7 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 bool Logic::handleDialogClick(const Common::Point &screenPos) {
 	if (!_dialogOpen)
 		return false;
-	const Graphics::Font *font = TextWriter::dialogFont();
-	const int lineHeight = (font ? font->getFontHeight() : 12) + 2;
+	const int lineHeight = 22; // WrChunkSize
 	int top = kScreenHeight - (int)_visibleSentences.size() * lineHeight - 4;
 	if (screenPos.y >= top)
 		pickSentence((screenPos.y - top) / lineHeight);

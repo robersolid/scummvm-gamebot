@@ -671,26 +671,19 @@ Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
 	// Since version 2 every character carries its own state, so a
 	// restore brings back the partner and the changer medallion
 	Character *all[3] = { &_mortadelo, &_filemon, &_both };
+	int16 cx[3], cy[3];
+	uint16 corient[3], clayer[3];
+	byte cvisible[3];
 	if (s.getVersion() >= 2) {
 		for (uint i = 0; i < 3; i++) {
-			int16 cx = all[i]->x(), cy = all[i]->y();
-			uint16 corient = all[i]->orientation(), clayer = all[i]->layer();
-			byte cvisible = all[i]->visible ? 1 : 0;
-			s.syncAsSint16LE(cx);
-			s.syncAsSint16LE(cy);
-			s.syncAsUint16LE(corient);
-			s.syncAsUint16LE(clayer);
-			s.syncAsByte(cvisible);
-			if (s.isLoading()) {
-				CharacterLocation location;
-				location.characterId = all[i]->objectId();
-				location.x = cx;
-				location.y = cy;
-				location.orientation = corient;
-				location.layer = clayer;
-				all[i]->enterPhase(_world, location);
-				all[i]->visible = cvisible != 0;
-			}
+			cx[i] = all[i]->x(); cy[i] = all[i]->y();
+			corient[i] = all[i]->orientation(); clayer[i] = all[i]->layer();
+			cvisible[i] = all[i]->visible ? 1 : 0;
+			s.syncAsSint16LE(cx[i]);
+			s.syncAsSint16LE(cy[i]);
+			s.syncAsUint16LE(corient[i]);
+			s.syncAsUint16LE(clayer[i]);
+			s.syncAsByte(cvisible[i]);
 		}
 	}
 
@@ -698,6 +691,20 @@ Common::Error GamebotEngine::syncGame(Common::Serializer &s) {
 		if (!_world.gotoPhase(phaseId))
 			return Common::kUnknownError;
 		_logic.applyObjectStates();
+		// Characters place themselves once the phase (and its walk
+		// map, which drives the scale bands) is loaded
+		if (s.getVersion() >= 2) {
+			for (uint i = 0; i < 3; i++) {
+				CharacterLocation location;
+				location.characterId = all[i]->objectId();
+				location.x = cx[i];
+				location.y = cy[i];
+				location.orientation = corient[i];
+				location.layer = clayer[i];
+				all[i]->enterPhase(_world, location);
+				all[i]->visible = cvisible[i] != 0;
+			}
+		}
 		_master = (masterId == _filemon.objectId()) ? &_filemon :
 			(masterId == _both.objectId()) ? &_both : &_mortadelo;
 		CharacterLocation location;
