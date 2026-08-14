@@ -58,8 +58,23 @@ bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type) {
 
 	g_engine->_mixer->stopHandle(_soundHandle);
 	g_engine->_mixer->playStream(type, &_soundHandle, stream);
+	WatchedSound watched;
+	watched.handle = _soundHandle;
+	watched.resId = resId;
+	_watched.push_back(watched);
 	debugC(kDebugSound, "Playing sound %08x (%u bytes)", resId, e->size);
 	return true;
+}
+
+void SoundManager::pollFinishedSounds(Common::Array<uint32> &finished) {
+	for (uint i = 0; i < _watched.size();) {
+		if (!g_engine->_mixer->isSoundHandleActive(_watched[i].handle)) {
+			finished.push_back(_watched[i].resId);
+			_watched.remove_at(i);
+		} else {
+			i++;
+		}
+	}
 }
 
 bool SoundManager::isSoundPlaying() const {

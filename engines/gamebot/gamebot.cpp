@@ -115,11 +115,24 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 	_hoverObjectId = hovering ? hit.objectId : 0;
 	_hoverName = hovering ? hit.name : Common::String();
 
-	// While an object hangs from the cursor its image stays put
-	if (!_linkedObject && hovering != _hotCursorShown) {
-		setCursor(hovering ? _hotCursor : _standardCursor);
+	if (hovering != _hotCursorShown) {
+		if (_linkedObject)
+			// The carried object swaps to its red-outlined image while
+			// it hovers an interactable (original evObjSetInvImage)
+			applyLinkedCursor(hovering);
+		else
+			setCursor(hovering ? _hotCursor : _standardCursor);
 		_hotCursorShown = hovering;
 	}
+}
+
+// Puts the linked object's inventory image on the cursor, in its
+// normal or highlighted (red outline) variant
+void GamebotEngine::applyLinkedCursor(bool highlighted) {
+	int16 width = 0, height = 0;
+	const byte *pixels = _inventoryUI.itemCursor(_linkedObject, width, height, highlighted);
+	if (pixels)
+		CursorMan.replaceCursor(pixels, width, height, width / 2, height / 2, 0);
 }
 
 // Swaps the mouse cursor for the linked object's inventory image
@@ -131,10 +144,8 @@ void GamebotEngine::linkObject(uint32 objectId) {
 		_hotCursorShown = false;
 		return;
 	}
-	int16 width = 0, height = 0;
-	const byte *pixels = _inventoryUI.itemCursor(objectId, width, height);
-	if (pixels)
-		CursorMan.replaceCursor(pixels, width, height, width / 2, height / 2, 0);
+	applyLinkedCursor(false);
+	_hotCursorShown = false;
 	debugC(kDebugEvents, "Item %08x linked to the cursor", objectId);
 }
 
@@ -253,27 +264,13 @@ void GamebotEngine::handleLeftUp(const Common::Point &screenPos) {
 	handleMouseClick(screenPos);
 }
 
-// The name of the hovered interactable, at the bottom of the screen
-// (the original SayName label)
+// The name of the hovered interactable, written exactly like any
+// writer text (the original posts it as evTextWriteStr)
 void GamebotEngine::drawHoverName(Graphics::Screen *screen) const {
 	if (_hoverName.empty() || _logic.isBusy() || _logic.isDialogOpen() ||
 			_inventoryUI.isOpen() || _verbPalette.isOpen() || _mainMenu.isOpen())
 		return;
-	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kBigGUIFont);
-	if (!font)
-		return;
-	byte palette[256 * 3];
-	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
-	int bright = 255, dark = 254, maxSum = -1, minSum = 999;
-	for (int i = 1; i < 256; i++) {
-		int sum = palette[i * 3] + palette[i * 3 + 1] + palette[i * 3 + 2];
-		if (sum > maxSum) { maxSum = sum; bright = i; }
-		if (sum < minSum) { minSum = sum; dark = i; }
-	}
-	Common::U32String name(_hoverName, Common::kISO8859_1);
-	int y = screen->h - font->getFontHeight() - 6;
-	font->drawString(screen, name, 21, y + 2, screen->w - 40, dark, Graphics::kTextAlignCenter);
-	font->drawString(screen, name, 20, y, screen->w - 40, bright, Graphics::kTextAlignCenter);
+	_logic.writer().drawText(screen, _hoverName, false);
 }
 
 bool GamebotEngine::playVideo(uint32 flicResId) {
@@ -342,10 +339,48 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 	}
 
 	_sounds.stopSound();
-	_world.applyPalette();
+	// The original restore after a video fades from black into the
+	// phase palette
+	fadeIn(_world.palette());
 	if (_world.musicCode())
 		_sounds.playMusic(_world.musicCode());
 	return true;
+}
+
+void GamebotEngine::fadeOut() {
+	byte pal[256 * 3];
+	g_system->getPaletteManager()->grabPalette(pal, 0, 256);
+	bool pending = true;
+	while (pending && !shouldQuit()) {
+		pending = false;
+		for (uint i = 0; i < sizeof(pal); i++) {
+			if (pal[i]) {
+				pal[i] -= MIN<byte>(5, pal[i]);
+				pending = true;
+			}
+		}
+		g_system->getPaletteManager()->setPalette(pal, 0, 256);
+		_screen->update();
+		g_system->delayMillis(10);
+	}
+}
+
+void GamebotEngine::fadeIn(const byte *target) {
+	byte pal[256 * 3] = {};
+	g_system->getPaletteManager()->setPalette(pal, 0, 256);
+	bool pending = true;
+	while (pending && !shouldQuit()) {
+		pending = false;
+		for (uint i = 0; i < sizeof(pal); i++) {
+			if (pal[i] < target[i]) {
+				pal[i] += MIN<byte>(5, target[i] - pal[i]);
+				pending = true;
+			}
+		}
+		g_system->getPaletteManager()->setPalette(pal, 0, 256);
+		_screen->update();
+		g_system->delayMillis(10);
+	}
 }
 
 // Toggles control between Mortadelo and Filemon when both are in
@@ -378,6 +413,10 @@ void GamebotEngine::setMasterById(uint32 characterId) {
 }
 
 bool GamebotEngine::gotoPhase(uint32 phaseId) {
+	// Every phase change fades the screen to black first, as the
+	// original MainControl does before switching
+	if (_world.currentPhaseId())
+		fadeOut();
 	if (!_world.gotoPhase(phaseId))
 		return false;
 

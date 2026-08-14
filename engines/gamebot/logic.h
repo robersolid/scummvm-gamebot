@@ -29,6 +29,7 @@
 #include "gamebot/resource.h"
 
 namespace Graphics {
+class Font;
 class Screen;
 }
 
@@ -50,6 +51,7 @@ enum EventCode {
 	kEventObjLookNow = 0x0E200000,
 	kEventObjOpenNow = 0x0E400000,
 	kEventObjUseNow = 0x0E800000,
+	kEventSoundPopEnded = 0x07000020,
 	kEventOptionsActivate = 0x08000001,
 	kEventTextClean = 0x0A000020,
 	kEventFXStartEffect = 0x0C000001,
@@ -117,6 +119,14 @@ public:
 	}
 	void update(uint32 millis);
 	void draw(Graphics::Screen *screen) const;
+	// Renders a text in the original writer style: bottom strip, up to
+	// two centered lines, yellow (or hot orange) over a double shadow
+	void drawText(Graphics::Screen *screen, const Common::String &text,
+		bool highlight) const;
+	// The 24-pixel screen font and the 19-pixel bold dialog font of
+	// the original WriterMaster
+	static const Graphics::Font *screenFont();
+	static const Graphics::Font *dialogFont();
 	bool active() const { return !_text.empty(); }
 
 private:
@@ -154,6 +164,7 @@ public:
 	void resetGame();
 
 	TextWriter &writer() { return _writer; }
+	const TextWriter &writer() const { return _writer; }
 
 	// Shows a phrase spoken by the master character: text on screen,
 	// talking animation and (eventually) the voice sample
@@ -224,9 +235,6 @@ private:
 	uint32 _pendingTake = 0;
 	// Rule owner whose ambient animations pause during its phrase
 	uint32 _phraseOwner = 0;
-	// Character hidden while its detached event animation plays
-	uint32 _hiddenCharAnim = 0;
-	uint32 _hiddenCharId = 0;
 	void startEventAnim(const ResourceEntry &e);
 };
 

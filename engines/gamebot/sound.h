@@ -36,6 +36,9 @@ public:
 
 	// Plays a one-shot sound (voice or effect) by resource id
 	bool playSound(uint32 resId, Audio::Mixer::SoundType type = Audio::Mixer::kSpeechSoundType);
+	// Sounds that finished since the last call; the rules can react
+	// to the original evSoundPopEnded event
+	void pollFinishedSounds(Common::Array<uint32> &finished);
 	bool isSoundPlaying() const;
 	void stopSound();
 
@@ -52,6 +55,12 @@ private:
 	Common::File _musicFile;
 	Audio::SoundHandle _soundHandle;
 	Audio::SoundHandle _musicHandle;
+	// Every started sound is watched until it ends
+	struct WatchedSound {
+		Audio::SoundHandle handle;
+		uint32 resId;
+	};
+	Common::Array<WatchedSound> _watched;
 	uint32 _currentMusic = 0;
 };
 

@@ -96,6 +96,7 @@ private:
 
 	void loadCursor(uint32 resId, Cursor &cursor);
 	void setCursor(const Cursor &cursor);
+	void applyLinkedCursor(bool highlighted);
 
 public:
 	void handleMouseMove(const Common::Point &screenPos);
@@ -154,6 +155,11 @@ public:
 
 	// Loads a phase and places the characters at its entry positions
 	bool gotoPhase(uint32 phaseId);
+
+	// Palette fades of the original VideoSys: every component ramps
+	// by 5 every 10 ms, down to black or up from black to the target
+	void fadeOut();
+	void fadeIn(const byte *target);
 
 	// Plays a full-screen FLC video (modal, skippable with a click
 	// or escape), then restores the phase palette and music

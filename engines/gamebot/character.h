@@ -117,6 +117,13 @@ public:
 	bool playActionAnim(uint32 code);
 	bool isActionAnimating() const { return _actionAnim != nullptr; }
 
+	// Scene (event) animation: the original swaps the character's
+	// active resource for it and draws it at absolute scene
+	// coordinates until the end notification restores the sprite
+	bool startSceneAnim(const ResourceEntry &e);
+	bool sceneAnimActive() const { return _sceneAnim.active; }
+	void finishSceneAnim(); // fast-forward to the end (click skip)
+
 	uint32 objectId() const { return _objectId; }
 	bool isLoaded() const { return _loaded; }
 	bool isWalking() const { return _walking; }
@@ -146,6 +153,22 @@ private:
 		uint32 framePeriod = 0;
 		Common::Array<uint32> sequence; // frame indexes (1-based)
 	};
+
+	struct SceneAnim {
+		bool active = false;
+		uint32 resId = 0;
+		Common::Rect rect;       // absolute phase coordinates
+		byte *frames = nullptr;  // owned
+		uint32 frameSize = 0;
+		uint32 imageCount = 0;
+		uint32 framePeriod = 0;
+		Common::Array<SequenceStep> sequence;
+		uint32 seqPos = 0;
+		uint32 stepTime = 0;
+	};
+	SceneAnim _sceneAnim;
+	void emitSceneStep() const;
+	void endSceneAnim();
 
 	bool loadAnimResource(const ResourceEntry &e, WalkAnim &anim);
 

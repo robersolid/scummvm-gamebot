@@ -454,10 +454,11 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 		Animation &anim = item.anims[a];
 		if (anim.running || !anim.autoFire)
 			continue;
-		if (!anim.fireTime) {
-			anim.fireTime = millis + anim.params.startPause + anim.params.framePeriod;
-			continue;
-		}
+		// A pause-less animation becomes the active resource on the
+		// activation itself (original StartAnimation), so the static
+		// image never flashes before it
+		if (!anim.fireTime)
+			anim.fireTime = millis + anim.params.startPause;
 		if (millis >= anim.fireTime) {
 			anim.running = true;
 			anim.seqPos = 0;
@@ -512,7 +513,7 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 			// pause) and let the rule tables see the end
 			anim.running = false;
 			anim.seqPos = 0;
-			anim.fireTime = millis + anim.params.startPause + anim.params.framePeriod;
+			anim.fireTime = millis + anim.params.startPause;
 			if (item.staticPixels) {
 				item.activeAnim = -1;
 				item.curDeltaX = item.curDeltaY = 0;
@@ -590,45 +591,6 @@ void World::setEnabled(uint32 objectId, bool enabled) {
 	}
 	debugC(kDebugActions, "Object %08x not in this phase (%s ignored)",
 		objectId, enabled ? "enable" : "disable");
-}
-
-// Plays an event animation that belongs to a character (the frames
-// draw the character at an absolute scene position, e.g. Mortadelo
-// picking the door lock); it renders as a transient front item
-bool World::startDetachedAnimation(const ResourceEntry &e) {
-	// A repeated activation restarts the running animation, as the
-	// original replaces its single active resource
-	for (uint i = 0; i < _items.size(); i++) {
-		DrawItem &existing = _items[i];
-		if (existing.objectId != e.objectId || existing.activeAnim < 0)
-			continue;
-		Animation &anim = existing.anims[existing.activeAnim];
-		if (anim.resId != e.resId)
-			continue;
-		anim.running = true;
-		anim.seqPos = 0;
-		anim.stepTime = g_system->getMillis() + anim.params.framePeriod;
-		debugC(kDebugActions, "Detached animation %08x/%08x restarted", e.objectId, e.resId);
-		return true;
-	}
-
-	DrawItem item;
-	item.objectId = e.objectId;
-	item.layer = 1; // front
-	Animation anim;
-	if (!loadAnimation(e, anim))
-		return false;
-	anim.autoFire = false;
-	anim.running = true;
-	anim.seqPos = 0;
-	anim.stepTime = g_system->getMillis() + anim.params.framePeriod;
-	anim.notifyEnd = true;
-	item.anims.push_back(anim);
-	item.activeAnim = 0;
-	_items.push_back(item);
-	debugC(kDebugActions, "Detached animation %08x/%08x started", e.objectId, e.resId);
-	emitStepEffects(_items.back(), _items.back().anims[0]);
-	return true;
 }
 
 // Jumps the running event animation to its end (fast-forward while
@@ -746,13 +708,17 @@ void World::draw(Graphics::Screen *screen, const Character *actor,
 	// them at the end of their layer's object list. When both share
 	// a layer the one lower on screen draws in front.
 	const Character *actors[2] = { actor, partner };
-	if (actor && partner && partner->layer() > actor->layer()) {
-		actors[0] = partner;
-		actors[1] = actor;
-	} else if (actor && partner && partner->layer() == actor->layer() &&
-			partner->y() > actor->y()) {
-		actors[0] = actor;
-		actors[1] = partner;
+	if (actor && partner) {
+		// A character playing a scene animation acts as scenery: the
+		// partner stays in front of it
+		if (actor->sceneAnimActive())
+			; // actor first (behind)
+		else if (partner->sceneAnimActive() ||
+				partner->layer() > actor->layer() ||
+				(partner->layer() == actor->layer() && partner->y() < actor->y())) {
+			actors[0] = partner;
+			actors[1] = actor;
+		}
 	}
 	bool drawn[2];
 	for (uint a = 0; a < 2; a++)

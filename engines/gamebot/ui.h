@@ -176,7 +176,7 @@ public:
 	void draw(Graphics::Screen *screen);
 
 	// Inventory image of an item, for the object-as-cursor swap
-	const byte *itemCursor(uint32 objectId, int16 &width, int16 &height);
+	const byte *itemCursor(uint32 objectId, int16 &width, int16 &height, bool highlighted = false);
 
 private:
 	struct ItemImages {

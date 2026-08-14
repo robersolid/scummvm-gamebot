@@ -517,12 +517,16 @@ uint32 InventoryUI::handleClick(const Common::Point &screenPos) {
 	return 0;
 }
 
-const byte *InventoryUI::itemCursor(uint32 objectId, int16 &width, int16 &height) {
+const byte *InventoryUI::itemCursor(uint32 objectId, int16 &width, int16 &height, bool highlighted) {
 	const ItemImages *images = itemImages(objectId);
 	if (!images)
 		return nullptr;
 	width = images->rect.width();
 	height = images->rect.height();
+	// The highlighted variant carries the red outline the original
+	// shows while the carried object hovers something interactable
+	if (highlighted && images->highlight)
+		return images->highlight;
 	return images->normal;
 }
 

@@ -63,7 +63,6 @@ public:
 	bool isEnabled(uint32 objectId) const;
 	void setEnabled(uint32 objectId, bool enabled);
 	bool startAnimation(uint32 objectId, uint32 resId);
-	bool startDetachedAnimation(const ResourceEntry &e);
 	bool skipEventAnimation();
 
 	// Freezes or resumes an object's ambient animations (e.g. while
@@ -72,6 +71,7 @@ public:
 
 	// Re-applies the palette of the current phase (after a video)
 	void applyPalette() const;
+	const byte *palette() const { return _palette; }
 	uint32 musicCode() const { return _musicCode; }
 
 	// Weather control (0 = off, 1 = snow, 2 = rain), driven by the

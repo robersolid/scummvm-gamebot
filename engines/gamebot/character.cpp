@@ -50,6 +50,7 @@ static int cellDisplacement(byte cell) {
 }
 
 Character::~Character() {
+	delete[] _sceneAnim.frames;
 	delete[] _staticFront.pixels;
 	delete[] _staticBack.pixels;
 	delete[] _talkFront.frames;
@@ -58,6 +59,87 @@ Character::~Character() {
 		delete[] _walkAnims[i].frames;
 	for (uint i = 0; i < 3; i++)
 		delete[] _takeAnims[i].frames;
+}
+
+// The original evObjActivateAnim on a character: any walk, gesture or
+// talk stops outright and the animation becomes the active resource
+bool Character::startSceneAnim(const ResourceEntry &e) {
+	if (_sceneAnim.active && _sceneAnim.resId == e.resId) {
+		// The reactivation at a walk arrival continues the running
+		// animation instead of replaying it
+		debugC(kDebugActions, "Scene animation %08x already running", e.resId);
+		return true;
+	}
+	delete[] _sceneAnim.frames;
+	_sceneAnim = SceneAnim();
+
+	ResourceFile &res = g_engine->resources();
+	byte *data = res.readBlob(e);
+	if (!data)
+		return false;
+	_sceneAnim.rect = Common::Rect(
+		READ_LE_INT32(data), READ_LE_INT32(data + 4),
+		READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+	_sceneAnim.frameSize = _sceneAnim.rect.width() * _sceneAnim.rect.height();
+	_sceneAnim.imageCount = READ_LE_UINT32(data + 16);
+	uint32 sequenceCount = READ_LE_UINT32(data + 20);
+	_sceneAnim.framePeriod = READ_LE_UINT32(data + 24);
+	uint32 imageLocation = READ_LE_UINT32(data + 32);
+	_sceneAnim.sequence.resize(sequenceCount);
+	for (uint32 i = 0; i < sequenceCount; i++) {
+		_sceneAnim.sequence[i].imageIndex = READ_LE_UINT32(data + 36 + i * 12);
+		_sceneAnim.sequence[i].soundCode = READ_LE_UINT32(data + 40 + i * 12);
+		_sceneAnim.sequence[i].textCode = READ_LE_UINT32(data + 44 + i * 12);
+	}
+	delete[] data;
+
+	_sceneAnim.frames = new byte[_sceneAnim.frameSize * _sceneAnim.imageCount];
+	Common::File &file = res.file();
+	file.seek(imageLocation);
+	if (file.read(_sceneAnim.frames, _sceneAnim.frameSize * _sceneAnim.imageCount) !=
+			_sceneAnim.frameSize * _sceneAnim.imageCount) {
+		warning("Could not read frames of %08x", e.resId);
+		delete[] _sceneAnim.frames;
+		_sceneAnim = SceneAnim();
+		return false;
+	}
+	_sceneAnim.resId = e.resId;
+	_sceneAnim.active = true;
+
+	// StopTimer(0) of the original: whatever was running stops
+	_walking = false;
+	_actionAnim = nullptr;
+	_talking = false;
+	debugC(kDebugActions, "Character %08x scene animation %08x starts",
+		_objectId, e.resId);
+	emitSceneStep();
+	return true;
+}
+
+void Character::emitSceneStep() const {
+	if (_sceneAnim.seqPos >= _sceneAnim.sequence.size())
+		return;
+	const SequenceStep &step = _sceneAnim.sequence[_sceneAnim.seqPos];
+	if (step.soundCode)
+		g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType);
+	if (step.textCode)
+		g_engine->logic().writer().showTextCode(step.textCode);
+}
+
+// End of the scene animation: release it, drop back to the static
+// sprite and report the end to the rule tables
+void Character::endSceneAnim() {
+	uint32 resId = _sceneAnim.resId;
+	delete[] _sceneAnim.frames;
+	_sceneAnim = SceneAnim();
+	debugC(kDebugActions, "Character %08x scene animation %08x ended",
+		_objectId, resId);
+	g_engine->logic().onAnimationEnded(resId);
+}
+
+void Character::finishSceneAnim() {
+	if (_sceneAnim.active)
+		endSceneAnim();
 }
 
 bool Character::playActionAnim(uint32 code) {
@@ -414,6 +496,24 @@ bool Character::walkTo(const World &world, Common::Point target) {
 }
 
 void Character::tick(uint32 millis, const World &world) {
+	// A scene animation replaces every other activity of the character
+	if (_sceneAnim.active) {
+		if (!_sceneAnim.stepTime)
+			_sceneAnim.stepTime = millis + _sceneAnim.framePeriod;
+		while (_sceneAnim.active && millis >= _sceneAnim.stepTime) {
+			_sceneAnim.stepTime += _sceneAnim.framePeriod ? _sceneAnim.framePeriod : 100;
+			_sceneAnim.seqPos++;
+			uint32 imageIndex = (_sceneAnim.seqPos < _sceneAnim.sequence.size())
+				? _sceneAnim.sequence[_sceneAnim.seqPos].imageIndex : 0;
+			if (imageIndex == 0 || imageIndex >= SequenceStep::kAutoDisable) {
+				endSceneAnim();
+				break;
+			}
+			emitSceneStep();
+		}
+		return;
+	}
+
 	// One-shot gesture in progress (e.g. taking an object)
 	if (_actionAnim) {
 		if (!_actionStepTime)
@@ -519,6 +619,30 @@ void Character::drawScaled(Graphics::Screen *screen, const byte *pixels,
 void Character::draw(Graphics::Screen *screen, const Common::Point &origin) const {
 	if (!_loaded || !visible)
 		return;
+
+	// Scene animation: unscaled at its own absolute rect, "without
+	// further preamble" as the original Redraw does
+	if (_sceneAnim.active) {
+		uint32 imageIndex = _sceneAnim.sequence.empty()
+			? 1 : _sceneAnim.sequence[_sceneAnim.seqPos].imageIndex;
+		if (imageIndex < 1 || imageIndex > _sceneAnim.imageCount)
+			imageIndex = 1;
+		const byte *pixels = _sceneAnim.frames + (imageIndex - 1) * _sceneAnim.frameSize;
+		Common::Rect dest(_sceneAnim.rect);
+		dest.translate(-origin.x, -origin.y);
+		Common::Rect clipped(dest);
+		clipped.clip(Common::Rect(0, 0, screen->w, screen->h));
+		for (int dy = clipped.top; dy < clipped.bottom; dy++) {
+			const byte *src = pixels + (dy - dest.top) * _sceneAnim.rect.width()
+				+ (clipped.left - dest.left);
+			byte *dst = (byte *)screen->getBasePtr(clipped.left, dy);
+			for (int dx = clipped.left; dx < clipped.right; dx++, src++, dst++) {
+				if (*src != kTransparentColor)
+					*dst = *src;
+			}
+		}
+		return;
+	}
 
 	if (_actionAnim) {
 		uint32 imageIndex = _actionAnim->sequence.empty() ? 1 : _actionAnim->sequence[_actionStep];

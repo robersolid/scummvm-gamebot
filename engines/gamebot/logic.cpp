@@ -20,9 +20,11 @@
  */
 
 #include "common/debug.h"
+#include "common/file.h"
 #include "common/system.h"
 #include "graphics/fontman.h"
 #include "graphics/font.h"
+#include "graphics/fonts/ttf.h"
 #include "graphics/paletteman.h"
 #include "graphics/screen.h"
 
@@ -36,6 +38,67 @@ namespace Gamebot {
 
 // Guard against runaway rule chains
 static int s_dispatchDepth = 0;
+
+// Text colors of the original WriterMaster, mapped onto the current
+// palette the same way GDI matched them on the 8bpp screen
+static byte findNearestColor(byte r, byte g, byte b) {
+	byte palette[256 * 3];
+	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
+	uint best = 255;
+	uint32 bestDist = 0xffffffff;
+	for (uint i = 0; i < 256; i++) {
+		int dr = (int)palette[i * 3] - r;
+		int dg = (int)palette[i * 3 + 1] - g;
+		int db = (int)palette[i * 3 + 2] - b;
+		uint32 dist = (uint32)(dr * dr + dg * dg + db * db);
+		if (dist < bestDist) {
+			bestDist = dist;
+			best = i;
+		}
+	}
+	return (byte)best;
+}
+
+// The original creates a 24-pixel Comic Sans MS for the screen texts
+// and a 19-pixel bold one for the dialog sentences. A comic.ttf (and
+// comicbd.ttf) next to the game data is used when present, then the
+// bundled Liberation fonts, then the GUI font as a last resort.
+static const Graphics::Font *loadWriterFont(bool dialog) {
+	const Graphics::Font *font = nullptr;
+#ifdef USE_FREETYPE2
+	const int size = dialog ? 19 : 24;
+	Common::File *file = new Common::File();
+	if (file->open(dialog ? "comicbd.ttf" : "comic.ttf")) {
+		font = Graphics::loadTTFFont(file, DisposeAfterUse::YES, size,
+			Graphics::kTTFSizeModeCell);
+		if (font)
+			return font;
+	} else {
+		delete file;
+	}
+	font = Graphics::loadTTFFontFromArchive(
+		dialog ? "LiberationSans-Bold.ttf" : "LiberationSans-Regular.ttf",
+		size, Graphics::kTTFSizeModeCell);
+	if (font)
+		return font;
+#endif
+	return FontMan.getFontByUsage(dialog ?
+		Graphics::FontManager::kGUIFont : Graphics::FontManager::kBigGUIFont);
+}
+
+const Graphics::Font *TextWriter::screenFont() {
+	static const Graphics::Font *font = nullptr;
+	if (!font)
+		font = loadWriterFont(false);
+	return font;
+}
+
+const Graphics::Font *TextWriter::dialogFont() {
+	static const Graphics::Font *font = nullptr;
+	if (!font)
+		font = loadWriterFont(true);
+	return font;
+}
 
 void TextWriter::showTextCode(uint32 textCode) {
 	const ResourceEntry *e = g_engine->resources().findByResId(textCode);
@@ -64,40 +127,49 @@ void TextWriter::update(uint32 millis) {
 }
 
 void TextWriter::draw(Graphics::Screen *screen) const {
-	if (_text.empty())
-		return;
+	if (!_text.empty())
+		drawText(screen, _text, false);
+}
 
-	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kBigGUIFont);
+// Original writer layout: a strip at the bottom of the screen, 30
+// pixels per line and at most two lines, each centered and clipped;
+// the text is yellow (hot orange when highlighted) over a shadow
+// printed twice at growing offsets
+void TextWriter::drawText(Graphics::Screen *screen, const Common::String &text,
+		bool highlight) const {
+	if (text.empty())
+		return;
+	const Graphics::Font *font = screenFont();
 	if (!font)
 		return;
 
-	// The original wrote RGB text over the 8bpp scene via GDI; here
-	// the brightest and darkest palette entries stand in for the
-	// phrase color and its shade
-	byte palette[256 * 3];
-	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
-	int bright = 255, dark = 254, maxSum = -1, minSum = 999;
-	for (int i = 1; i < 256; i++) {
-		int sum = palette[i * 3] + palette[i * 3 + 1] + palette[i * 3 + 2];
-		if (sum > maxSum) { maxSum = sum; bright = i; }
-		if (sum < minSum) { minSum = sum; dark = i; }
+	const int kLineHeight = 30; // WrNormalHeight
+	Common::Array<Common::U32String> lines;
+	font->wordWrapText(Common::U32String(text, Common::kISO8859_1), screen->w, lines);
+	if (lines.size() > 2) {
+		// The original cuts what does not fit, adding an ellipsis
+		lines.resize(2);
+		lines[1] += Common::U32String("...");
 	}
 
-	const int width = screen->w - 40;
-	Common::Array<Common::U32String> lines;
-	font->wordWrapText(Common::U32String(_text, Common::kISO8859_1), width, lines);
-	int y = 8;
+	byte shade = findNearestColor(5, 5, 5);
+	byte color = highlight ? findNearestColor(255, 120, 0)
+		: findNearestColor(255, 255, 5);
+	int top = screen->h - kLineHeight * (int)lines.size();
 	for (uint i = 0; i < lines.size(); i++) {
-		font->drawString(screen, lines[i], 21, y + 2, width, dark, Graphics::kTextAlignCenter);
-		font->drawString(screen, lines[i], 20, y, width, bright, Graphics::kTextAlignCenter);
-		y += font->getFontHeight();
+		int y = top + (int)i * kLineHeight + 1;
+		int x = (screen->w - font->getStringWidth(lines[i])) / 2;
+		font->drawString(screen, lines[i], x + 1, y + 1, screen->w, shade);
+		font->drawString(screen, lines[i], x + 2, y + 2, screen->w, shade);
+		font->drawString(screen, lines[i], x, y, screen->w, color);
 	}
 }
 
 bool Logic::isBusy() const {
 	return _writer.active() || _scriptedWalk != 0 || _pendingAnswerAnim != 0 ||
-		_pendingTake != 0 || _hiddenCharAnim != 0 ||
-		g_engine->master().isActionAnimating();
+		_pendingTake != 0 || g_engine->master().isActionAnimating() ||
+		g_engine->mortadelo().sceneAnimActive() ||
+		g_engine->filemon().sceneAnimActive();
 }
 
 void Logic::addToInventory(uint32 objectId) {
@@ -327,6 +399,14 @@ void Logic::sayPhrase(uint32 textCode, uint32 soundCode) {
 }
 
 void Logic::update(uint32 millis) {
+	// Finished sounds fire the original pop-ended event, which some
+	// rules wait on (e.g. the snow mound disappears when Momiez's
+	// greeting voice ends)
+	Common::Array<uint32> finishedSounds;
+	g_engine->sounds().pollFinishedSounds(finishedSounds);
+	for (uint i = 0; i < finishedSounds.size(); i++)
+		dispatchEvent(kEventSoundPopEnded, finishedSounds[i], 0);
+
 	// A phrase with a voice stays on screen while the voice plays
 	if (_phraseSound && g_engine->sounds().isSoundPlaying())
 		_writer.keepAlive(millis);
@@ -447,15 +527,10 @@ void Logic::resetGame() {
 // the character hidden until they end.
 void Logic::startEventAnim(const ResourceEntry &e) {
 	Character *ch = g_engine->characterById(e.objectId);
-	if (ch) {
-		if (g_engine->world().startDetachedAnimation(e)) {
-			ch->visible = false;
-			_hiddenCharAnim = e.resId;
-			_hiddenCharId = e.objectId;
-		}
-	} else {
+	if (ch)
+		ch->startSceneAnim(e);
+	else
 		g_engine->world().startAnimation(e.objectId, e.resId);
-	}
 }
 
 void Logic::runAction(const ActionRule &rule, uint32 owner) {
@@ -590,6 +665,14 @@ bool Logic::skipPhrase() {
 bool Logic::skipCutscene() {
 	if (skipPhrase())
 		return true;
+	if (g_engine->mortadelo().sceneAnimActive()) {
+		g_engine->mortadelo().finishSceneAnim();
+		return true;
+	}
+	if (g_engine->filemon().sceneAnimActive()) {
+		g_engine->filemon().finishSceneAnim();
+		return true;
+	}
 	return g_engine->world().skipEventAnimation();
 }
 
@@ -630,13 +713,6 @@ void Logic::onPhraseEnded() {
 }
 
 void Logic::onAnimationEnded(uint32 resId) {
-	// A character hidden behind its detached animation comes back
-	if (_hiddenCharAnim && resId == _hiddenCharAnim) {
-		Character *ch = g_engine->characterById(_hiddenCharId);
-		if (ch)
-			ch->visible = true;
-		_hiddenCharAnim = _hiddenCharId = 0;
-	}
 	if (_pendingAnswerAnim && resId == _pendingAnswerAnim) {
 		_pendingAnswerAnim = 0;
 		if (_sentenceFlags & kDialogGoodbye)
@@ -756,18 +832,12 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 	if (!_dialogOpen)
 		return;
 
-	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	const Graphics::Font *font = TextWriter::dialogFont();
 	if (!font)
 		return;
 
-	byte palette[256 * 3];
-	g_system->getPaletteManager()->grabPalette(palette, 0, 256);
-	int bright = 255, dark = 254, maxSum = -1, minSum = 999;
-	for (int i = 1; i < 256; i++) {
-		int sum = palette[i * 3] + palette[i * 3 + 1] + palette[i * 3 + 2];
-		if (sum > maxSum) { maxSum = sum; bright = i; }
-		if (sum < minSum) { minSum = sum; dark = i; }
-	}
+	byte bright = findNearestColor(255, 255, 5);
+	byte dark = findNearestColor(5, 5, 5);
 
 	const int lineHeight = font->getFontHeight() + 2;
 	int y = screen->h - (int)_visibleSentences.size() * lineHeight - 4;
@@ -789,7 +859,7 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 bool Logic::handleDialogClick(const Common::Point &screenPos) {
 	if (!_dialogOpen)
 		return false;
-	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	const Graphics::Font *font = TextWriter::dialogFont();
 	const int lineHeight = (font ? font->getFontHeight() : 12) + 2;
 	int top = kScreenHeight - (int)_visibleSentences.size() * lineHeight - 4;
 	if (screenPos.y >= top)
