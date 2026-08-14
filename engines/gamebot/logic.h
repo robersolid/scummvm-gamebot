@@ -179,7 +179,7 @@ public:
 	// Conversations (original DialogMaster): a dialog resource holds
 	// sentences the player can pick; a picked line is spoken, may run
 	// an answer animation and reopens the list until a goodbye line
-	void activateDialog(uint32 dialogId);
+	void activateDialog(uint32 dialogId, uint32 ownerId = 0);
 	void pickSentence(uint index);
 	bool isDialogOpen() const { return _dialogOpen; }
 
@@ -200,7 +200,7 @@ private:
 	uint dispatchEvent(uint32 eventId, uint32 param1, uint32 param2);
 	bool checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam);
 	void runAction(const ActionRule &rule, uint32 owner);
-	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3);
+	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32 owner = 0);
 	void sayGenericResponse(uint32 verbEventId, uint16 responseFlags);
 
 	// Loads a dialog's sentences, preferring the state in default.dlg
@@ -235,6 +235,7 @@ private:
 	uint32 _pendingTake = 0;
 	// Rule owner whose ambient animations pause during its phrase
 	uint32 _phraseOwner = 0;
+	uint32 _dialogOwner = 0;
 	void startEventAnim(const ResourceEntry &e);
 };
 

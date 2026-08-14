@@ -172,6 +172,7 @@ private:
 		ResourceType type = kResUnknown;
 		Common::Rect rect;
 		uint32 exitPhase = 0;    // for phase/map exits
+		bool enabled = true;     // follows the owning object's state
 	};
 
 	void clear();

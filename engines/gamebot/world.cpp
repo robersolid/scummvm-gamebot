@@ -35,6 +35,18 @@ namespace Gamebot {
 // Color 0 is transparent in every image
 static const byte kTransparentColor = 0;
 
+// Reads an inclusive bottom-right rect from a resource blob. A few
+// resources in the data carry swapped corners (e.g. the TIA barracks
+// hidden hotspot); the original never matches those rects, so they
+// degrade to an empty rect here instead of asserting.
+static Common::Rect readBlobRect(const byte *data) {
+	int32 left = READ_LE_INT32(data), top = READ_LE_INT32(data + 4);
+	int32 right = READ_LE_INT32(data + 8) + 1, bottom = READ_LE_INT32(data + 12) + 1;
+	if (right < left || bottom < top)
+		return Common::Rect(left, top, left, top);
+	return Common::Rect(left, top, right, bottom);
+}
+
 // Palette indexes used by the debug overlays; late entries chosen as
 // they rarely clash with visible art
 static const byte kOverlayWalkColor = 255;
@@ -276,9 +288,7 @@ void World::addDrawItem(const ObjectEntry &object, uint16 layer) {
 				hotspot.objectId = object.objectId;
 				hotspot.name = object.name;
 				hotspot.type = e.type;
-				hotspot.rect = Common::Rect(
-					READ_LE_INT32(data), READ_LE_INT32(data + 4),
-					READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+				hotspot.rect = readBlobRect(data);
 				if (e.type != kResHiddenImage && e.size >= 16 + 4)
 					hotspot.exitPhase = READ_LE_UINT32(data + 16);
 				_hotspots.push_back(hotspot);
@@ -291,9 +301,7 @@ void World::addDrawItem(const ObjectEntry &object, uint16 layer) {
 			byte *data = res.readBlob(e);
 			if (!data)
 				continue;
-			item.rect = Common::Rect(
-				READ_LE_INT32(data), READ_LE_INT32(data + 4),
-				READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+			item.rect = readBlobRect(data);
 			item.staticPixels = new byte[item.rect.width() * item.rect.height()];
 			memcpy(item.staticPixels, data + 16, item.rect.width() * item.rect.height());
 			delete[] data;
@@ -330,9 +338,7 @@ bool World::loadAnimation(const ResourceEntry &e, Animation &anim) {
 		return false;
 
 	anim.resId = e.resId;
-	anim.rect = Common::Rect(
-		READ_LE_INT32(data), READ_LE_INT32(data + 4),
-		READ_LE_INT32(data + 8) + 1, READ_LE_INT32(data + 12) + 1);
+	anim.rect = readBlobRect(data);
 	anim.frameSize = anim.rect.width() * anim.rect.height();
 	anim.params.imageCount = READ_LE_UINT32(data + 16);
 	anim.params.sequenceCount = READ_LE_UINT32(data + 20);
@@ -412,9 +418,12 @@ bool World::gotoPhase(uint32 phaseId) {
 			const ObjectEntry &object = world.object(disabled.objectFirst + o);
 			uint16 layer = (uint16)CLIP<uint32>(object.activeLayer, 1, phase.layerCount - 1);
 			uint before = _items.size();
+			uint hotspotsBefore = _hotspots.size();
 			addDrawItem(object, layer);
 			for (uint i = before; i < _items.size(); i++)
 				_items[i].visible = false;
+			for (uint i = hotspotsBefore; i < _hotspots.size(); i++)
+				_hotspots[i].enabled = false;
 		}
 		for (uint i = firstHidden; i < _items.size(); i++) {
 			DrawItem item = _items[i];
@@ -445,12 +454,14 @@ void World::emitStepEffects(const DrawItem &item, const Animation &anim) const {
 void World::updateItem(DrawItem &item, uint32 millis) {
 	// The original object has a single active resource: while any
 	// animation runs (automatic or event), the pending ones wait for
-	// it to end, in resource order
+	// it to end, in resource order. A paused object (listening to a
+	// phrase or holding a conversation) arms no automatic animation,
+	// but a running event animation still plays.
 	bool animRunning = item.activeAnim >= 0 && item.anims[item.activeAnim].running;
 
 	// Start whichever animation reaches its fire time; a firing
 	// animation becomes the active resource of the object
-	for (uint a = 0; a < item.anims.size() && !animRunning; a++) {
+	for (uint a = 0; a < item.anims.size() && !animRunning && !item.animsPaused; a++) {
 		Animation &anim = item.anims[a];
 		if (anim.running || !anim.autoFire)
 			continue;
@@ -475,7 +486,7 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 	if (item.activeAnim < 0)
 		return;
 	Animation &anim = item.anims[item.activeAnim];
-	if (!anim.running)
+	if (!anim.running || (item.animsPaused && anim.autoFire))
 		return;
 
 	while (millis >= anim.stepTime && anim.running) {
@@ -536,7 +547,7 @@ void World::updateItem(DrawItem &item, uint32 millis) {
 
 void World::update(uint32 millis) {
 	for (uint i = 0; i < _items.size(); i++) {
-		if (!_items[i].anims.empty() && _items[i].visible && !_items[i].animsPaused)
+		if (!_items[i].anims.empty() && _items[i].visible)
 			updateItem(_items[i], millis);
 	}
 	updateWeather(millis);
@@ -580,6 +591,11 @@ bool World::isEnabled(uint32 objectId) const {
 }
 
 void World::setEnabled(uint32 objectId, bool enabled) {
+	// The interaction areas follow the object in and out of layer 0
+	for (uint i = 0; i < _hotspots.size(); i++) {
+		if (_hotspots[i].objectId == objectId)
+			_hotspots[i].enabled = enabled;
+	}
 	// The original moves disabled objects to layer 0; visibility is
 	// the observable effect for both drawing and hit tests
 	for (uint i = 0; i < _items.size(); i++) {
@@ -666,7 +682,7 @@ bool World::hitTest(const Common::Point &pos, HitResult &result) const {
 	}
 
 	for (uint i = 0; i < _hotspots.size(); i++) {
-		if (!_hotspots[i].rect.contains(pos))
+		if (!_hotspots[i].enabled || !_hotspots[i].rect.contains(pos))
 			continue;
 		result.objectId = _hotspots[i].objectId;
 		result.name = _hotspots[i].name;

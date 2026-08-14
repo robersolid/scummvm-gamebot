@@ -98,6 +98,7 @@ Console::Console() : GUI::Debugger() {
 	registerCmd("master", WRAP_METHOD(Console, cmdMaster));
 	registerCmd("weather", WRAP_METHOD(Console, cmdWeather));
 	registerCmd("menu", WRAP_METHOD(Console, cmdMenu));
+	registerCmd("setobj", WRAP_METHOD(Console, cmdSetObj));
 	registerCmd("exitgame", WRAP_METHOD(Console, cmdExitGame));
 }
 
@@ -105,6 +106,15 @@ Console::Console() : GUI::Debugger() {
 // external timeout
 bool Console::cmdExitGame(int argc, const char **argv) {
 	g_engine->quitGame();
+	return true;
+}
+
+bool Console::cmdSetObj(int argc, const char **argv) {
+	if (argc < 3) {
+		debugPrintf("Usage: setobj <objectId> <0|1>\n");
+		return true;
+	}
+	g_engine->logic().setObjectEnabled(parseId(argv[1]), atoi(argv[2]) != 0);
 	return true;
 }
 

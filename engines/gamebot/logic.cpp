@@ -20,6 +20,7 @@
  */
 
 #include "common/debug.h"
+#include "common/events.h"
 #include "common/file.h"
 #include "common/system.h"
 #include "graphics/fontman.h"
@@ -66,8 +67,12 @@ static byte findNearestColor(byte r, byte g, byte b) {
 static const Graphics::Font *loadWriterFont(bool dialog) {
 	const Graphics::Font *font = nullptr;
 #ifdef USE_FREETYPE2
-	const int size = dialog ? 19 : 24;
+	// Original Comic Sans sizes are 24/19; the stand-in Liberation
+	// runs wider, so it drops a step to keep the same line lengths
 	Common::File *file = new Common::File();
+	int size = dialog ? 19 : 24;
+	if (!file->exists(dialog ? "comicbd.ttf" : "comic.ttf"))
+		size = 20;
 	if (file->open(dialog ? "comicbd.ttf" : "comic.ttf")) {
 		font = Graphics::loadTTFFont(file, DisposeAfterUse::YES, size,
 			Graphics::kTTFSizeModeCell);
@@ -407,8 +412,8 @@ void Logic::update(uint32 millis) {
 	for (uint i = 0; i < finishedSounds.size(); i++)
 		dispatchEvent(kEventSoundPopEnded, finishedSounds[i], 0);
 
-	// A phrase with a voice stays on screen while the voice plays
-	if (_phraseSound && g_engine->sounds().isSoundPlaying())
+	// A phrase with a voice stays on screen while its own voice plays
+	if (_phraseSound && g_engine->sounds().isSoundPlaying(_phraseSound))
 		_writer.keepAlive(millis);
 
 	bool phraseWasActive = _writer.active();
@@ -536,7 +541,7 @@ void Logic::startEventAnim(const ResourceEntry &e) {
 void Logic::runAction(const ActionRule &rule, uint32 owner) {
 	switch (rule.actionId) {
 	case kActionSendMsg:
-		handleMessage(rule.actionParam1, rule.actionParam2, rule.actionParam3);
+		handleMessage(rule.actionParam1, rule.actionParam2, rule.actionParam3, owner);
 		break;
 	case kActionStartAnimation: {
 		const ResourceEntry *e = g_engine->resources().findByResId(rule.actionParam1);
@@ -572,7 +577,7 @@ void Logic::runAction(const ActionRule &rule, uint32 owner) {
 	}
 }
 
-void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
+void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32 owner) {
 	// State side effects of the well-known messages, then the event
 	// is offered to the rule tables so chains keep running
 	switch (eventCode) {
@@ -594,7 +599,7 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 		break;
 	}
 	case kEventDialogActivate:
-		activateDialog(param2);
+		activateDialog(param2, owner);
 		break;
 	case kEventAppPhaseChange:
 		// The intro chain jumps to 0x99, which is the main menu
@@ -653,7 +658,8 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3) {
 bool Logic::skipPhrase() {
 	if (!_writer.active())
 		return false;
-	g_engine->sounds().stopSound();
+	if (_phraseSound)
+		g_engine->sounds().stopSound(_phraseSound);
 	_writer.update(UINT32_MAX);
 	debugC(kDebugEvents, "Phrase skipped");
 	onPhraseEnded();
@@ -719,7 +725,8 @@ void Logic::onAnimationEnded(uint32 resId) {
 			endDialog();
 		else
 			showDialogList();
-		return;
+		// The end still reaches the rule tables: chains like Momiez's
+		// password hang exactly on the answer animation's end
 	}
 	dispatchEvent(kEventObjAnimEnded, resId, 0);
 }
@@ -761,13 +768,18 @@ bool Logic::loadDialog(uint32 dialogId) {
 	return true;
 }
 
-void Logic::activateDialog(uint32 dialogId) {
+void Logic::activateDialog(uint32 dialogId, uint32 ownerId) {
 	if (!loadDialog(dialogId))
 		return;
 	_currentDialog = dialogId;
 	_answerAnim = 0;
 	_pendingAnswerAnim = 0;
 	_sentenceFlags = 0;
+	// The talked-to object stops its ambient animations for the whole
+	// conversation (original StopAutoAnim on the dialog activation)
+	_dialogOwner = ownerId;
+	if (_dialogOwner)
+		g_engine->world().pauseObjectAnims(_dialogOwner, true);
 	showDialogList();
 }
 
@@ -792,6 +804,10 @@ void Logic::endDialog() {
 	_currentDialog = 0;
 	_dialogOpen = false;
 	_visibleSentences.clear();
+	if (_dialogOwner) {
+		g_engine->world().pauseObjectAnims(_dialogOwner, false);
+		_dialogOwner = 0;
+	}
 	if (dialogId) {
 		debugC(kDebugActions, "Dialog %08x ended", dialogId);
 		dispatchEvent(0x09000004 /* evDialogEnded */, dialogId, 0);
@@ -837,10 +853,15 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 		return;
 
 	byte bright = findNearestColor(255, 255, 5);
+	byte hot = findNearestColor(255, 120, 0);
 	byte dark = findNearestColor(5, 5, 5);
 
 	const int lineHeight = font->getFontHeight() + 2;
-	int y = screen->h - (int)_visibleSentences.size() * lineHeight - 4;
+	int top = screen->h - (int)_visibleSentences.size() * lineHeight - 4;
+	// The sentence under the cursor highlights in the hot color
+	Common::Point mouse = g_system->getEventManager()->getMousePos();
+	int hovered = (mouse.y >= top) ? (mouse.y - top) / lineHeight : -1;
+	int y = top;
 	for (uint i = 0; i < _visibleSentences.size(); i++, y += lineHeight) {
 		const DialogSentence &sentence = _dialogs[_currentDialog][_visibleSentences[i]];
 		const ResourceEntry *e = g_engine->resources().findByResId(sentence.textId);
@@ -852,7 +873,8 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 		Common::U32String text(Common::String((const char *)data, e->size), Common::kISO8859_1);
 		delete[] data;
 		font->drawString(screen, text, 11, y + 1, screen->w - 20, dark);
-		font->drawString(screen, text, 10, y, screen->w - 20, bright);
+		font->drawString(screen, text, 10, y, screen->w - 20,
+			((int)i == hovered) ? hot : bright);
 	}
 }
 

@@ -63,6 +63,7 @@ private:
 	bool cmdMaster(int argc, const char **argv);
 	bool cmdWeather(int argc, const char **argv);
 	bool cmdMenu(int argc, const char **argv);
+	bool cmdSetObj(int argc, const char **argv);
 	bool cmdExitGame(int argc, const char **argv);
 
 	uint dumpImageBlob(const ResourceEntry &e, const byte *data);

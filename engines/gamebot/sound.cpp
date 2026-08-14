@@ -56,14 +56,31 @@ bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type) {
 	Audio::RewindableAudioStream *stream = Audio::makeADPCMStream(
 		memory, DisposeAfterUse::YES, e->size, Audio::kADPCMMS, kSampleRate, 1, kBlockAlign);
 
-	g_engine->_mixer->stopHandle(_soundHandle);
-	g_engine->_mixer->playStream(type, &_soundHandle, stream);
+	// Every pop mixes with the others, as the original DirectSound
+	// buffers do; each keeps its own handle for state queries
 	WatchedSound watched;
-	watched.handle = _soundHandle;
 	watched.resId = resId;
+	g_engine->_mixer->playStream(type, &watched.handle, stream);
+	_soundHandle = watched.handle;
 	_watched.push_back(watched);
 	debugC(kDebugSound, "Playing sound %08x (%u bytes)", resId, e->size);
 	return true;
+}
+
+bool SoundManager::isSoundPlaying(uint32 resId) const {
+	for (uint i = 0; i < _watched.size(); i++) {
+		if (_watched[i].resId == resId &&
+				g_engine->_mixer->isSoundHandleActive(_watched[i].handle))
+			return true;
+	}
+	return false;
+}
+
+void SoundManager::stopSound(uint32 resId) {
+	for (uint i = 0; i < _watched.size(); i++) {
+		if (_watched[i].resId == resId)
+			g_engine->_mixer->stopHandle(_watched[i].handle);
+	}
 }
 
 void SoundManager::pollFinishedSounds(Common::Array<uint32> &finished) {

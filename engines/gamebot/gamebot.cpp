@@ -344,7 +344,8 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 		g_system->delayMillis(10);
 	}
 
-	_sounds.stopSound();
+	if (soundCode)
+		_sounds.stopSound(soundCode);
 	CursorMan.showMouse(true);
 	// The original restore after a video fades from black into the
 	// phase palette

@@ -39,6 +39,10 @@ public:
 	// Sounds that finished since the last call; the rules can react
 	// to the original evSoundPopEnded event
 	void pollFinishedSounds(Common::Array<uint32> &finished);
+	// State and control of one specific playing sound; short sounds
+	// mix concurrently like the original DirectSound pops
+	bool isSoundPlaying(uint32 resId) const;
+	void stopSound(uint32 resId);
 	bool isSoundPlaying() const;
 	void stopSound();
 
