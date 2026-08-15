@@ -136,7 +136,8 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 	if (_logic.isDialogOpen()) {
 		_hoverObjectId = 0;
 		_hoverName.clear();
-		_hoverCursorRes = kCursorStandard;
+		_hoverCursorRes = (uint32)kCursorStandard;
+		updateCursorImage();
 		return;
 	}
 	if (_inventoryUI.isOpen()) {

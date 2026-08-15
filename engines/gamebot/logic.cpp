@@ -1037,15 +1037,16 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 	if (!font)
 		return;
 
-	byte bright = findNearestColor(255, 255, 5);
-	byte hot = findNearestColor(255, 120, 0);
-	byte dark = findNearestColor(5, 5, 5);
+	byte bright = findNearestColor(255, 255, 5); // wcColorStandard
+	byte hot = findNearestColor(255, 120, 0);     // wcColorHot
+	byte dark = findNearestColor(5, 5, 5);       // wcColorShade
 
 	const int lineHeight = 22; // WrChunkSize
 	int top = screen->h - (int)_visibleSentences.size() * lineHeight - 4;
 	// The sentence under the cursor highlights in the hot color
 	Common::Point mouse = g_system->getEventManager()->getMousePos();
-	int hovered = (mouse.y >= top) ? (mouse.y - top) / lineHeight : -1;
+	int hovered = (mouse.y >= top && mouse.y < top + (int)_visibleSentences.size() * lineHeight)
+		? (mouse.y - top) / lineHeight : -1;
 	int y = top;
 	for (uint i = 0; i < _visibleSentences.size(); i++, y += lineHeight) {
 		const DialogSentence &sentence = _dialogs[_currentDialog][_visibleSentences[i]];
@@ -1061,7 +1062,9 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 		Common::U32String text(Common::String((const char *)data, textLen), Common::kISO8859_1);
 		delete[] data;
 		text = reduceStr(font, text, screen->w - 8);
+		// Shadow printed twice as in the original ExtTextOut
 		font->drawString(screen, text, 5, y + 1, screen->w - 8, dark);
+		font->drawString(screen, text, 6, y + 2, screen->w - 8, dark);
 		font->drawString(screen, text, 4, y, screen->w - 8,
 			((int)i == hovered) ? hot : bright);
 	}
@@ -1072,7 +1075,8 @@ bool Logic::handleDialogClick(const Common::Point &screenPos) {
 		return false;
 	const int lineHeight = 22; // WrChunkSize
 	int top = kScreenHeight - (int)_visibleSentences.size() * lineHeight - 4;
-	if (screenPos.y >= top)
+	int bottom = top + (int)_visibleSentences.size() * lineHeight;
+	if (screenPos.y >= top && screenPos.y < bottom)
 		pickSentence((screenPos.y - top) / lineHeight);
 	return true;
 }
