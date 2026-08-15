@@ -95,6 +95,7 @@ public:
 		kActionCredits,
 		kActionOptions,
 		kActionQuit,
+		kActionReturn,
 		kActionCount
 	};
 

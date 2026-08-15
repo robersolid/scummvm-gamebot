@@ -101,6 +101,7 @@ private:
 	// enters select mode after 400 ms without mouse events)
 	bool _leftDown = false;
 	uint32 _lastMouseEventTime = 0;
+	bool _gameStarted = false;
 
 	void loadCursor(uint32 resId, Cursor &cursor);
 	void setCursor(const Cursor &cursor);
@@ -135,6 +136,7 @@ public:
 	Character &mortadelo() { return _mortadelo; }
 	Character &filemon() { return _filemon; }
 	Character &master() { return *_master; }
+	bool isGameStarted() const { return _gameStarted; }
 	const Character *secondCharacter() const {
 		// The visible non-master partner, if any
 		if (_master != &_mortadelo && _mortadelo.visible && _mortadelo.isLoaded())
@@ -201,7 +203,10 @@ public:
 	}
 	Common::Error loadGameStream(Common::SeekableReadStream *stream) override {
 		Common::Serializer s(stream, nullptr);
-		return syncGame(s);
+		Common::Error err = syncGame(s);
+		if (err.getCode() == Common::kNoError)
+			_gameStarted = true;
+		return err;
 	}
 };
 

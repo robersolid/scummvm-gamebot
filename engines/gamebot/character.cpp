@@ -123,7 +123,7 @@ void Character::emitSceneStep() const {
 		return;
 	const SequenceStep &step = _sceneAnim.sequence[_sceneAnim.seqPos];
 	if (step.soundCode)
-		g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType);
+		g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType, _objectId);
 	if (step.textCode)
 		g_engine->logic().writer().showTextCode(step.textCode);
 }
@@ -140,8 +140,10 @@ void Character::endSceneAnim() {
 }
 
 void Character::finishSceneAnim() {
-	if (_sceneAnim.active)
+	if (_sceneAnim.active) {
+		g_engine->sounds().stopSoundByObject(_objectId);
 		endSceneAnim();
+	}
 }
 
 bool Character::playActionAnim(uint32 code) {
@@ -214,8 +216,10 @@ bool Character::load(uint32 objectId) {
 
 	for (; i < (int)res.count() && res.entry(i).objectId == objectId; i++) {
 		const ResourceEntry &e = res.entry(i);
-		// Own resources use the (objectId << 8) + code id scheme
-		if ((e.resId >> 8) != objectId)
+		// Own resources use either (objectId << 8) + code (e.g. 0x99bb9910)
+		// or (charPrefix << 8) + code
+		uint32 prefix = e.resId >> 8;
+		if (prefix != objectId && prefix != (objectId >> 8))
 			continue;
 		uint32 code = e.resId & 0xff;
 
@@ -561,7 +565,7 @@ void Character::tick(uint32 millis, const World &world) {
 			}
 			const SequenceStep &actionStep = _actionAnim->sequence[_actionStep];
 			if (actionStep.soundCode)
-				g_engine->sounds().playSound(actionStep.soundCode);
+				g_engine->sounds().playSound(actionStep.soundCode, Audio::Mixer::kSpeechSoundType, _objectId);
 			if (actionStep.textCode)
 				g_engine->logic().writer().showTextCode(actionStep.textCode);
 			if (!_actionInterruptible && !_actionHalfFired &&
@@ -650,7 +654,7 @@ void Character::tick(uint32 millis, const World &world) {
 			if (_animStep < anim.sequence.size() &&
 					anim.sequence[_animStep].soundCode)
 				g_engine->sounds().playSound(anim.sequence[_animStep].soundCode,
-					Audio::Mixer::kSFXSoundType);
+					Audio::Mixer::kSFXSoundType, _objectId);
 		}
 	}
 }

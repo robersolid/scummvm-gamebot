@@ -35,7 +35,7 @@ public:
 	~SoundManager();
 
 	// Plays a one-shot sound (voice or effect) by resource id
-	bool playSound(uint32 resId, Audio::Mixer::SoundType type = Audio::Mixer::kSpeechSoundType);
+	bool playSound(uint32 resId, Audio::Mixer::SoundType type = Audio::Mixer::kSpeechSoundType, uint32 objectId = 0);
 	// Sounds that finished since the last call; the rules can react
 	// to the original evSoundPopEnded event
 	void pollFinishedSounds(Common::Array<uint32> &finished);
@@ -43,14 +43,14 @@ public:
 	// mix concurrently like the original DirectSound pops
 	bool isSoundPlaying(uint32 resId) const;
 	void stopSound(uint32 resId);
+	void stopSoundByObject(uint32 objectId);
 	bool isSoundPlaying() const;
 	void stopSound();
 
 	// Starts the looping background music by resource id
 	bool playMusic(uint32 resId);
 	void stopMusic();
-	uint32 currentMusic() const { return _currentMusic; }
-
+	void stopSFX();
 	void stopAll();
 
 private:
@@ -63,6 +63,7 @@ private:
 	struct WatchedSound {
 		Audio::SoundHandle handle;
 		uint32 resId;
+		uint32 objectId;
 	};
 	Common::Array<WatchedSound> _watched;
 	uint32 _currentMusic = 0;

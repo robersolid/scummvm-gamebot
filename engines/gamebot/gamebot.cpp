@@ -103,12 +103,12 @@ void GamebotEngine::updateCursorImage() {
 		_appliedCursorRes = 0;
 		return;
 	}
-	uint32 desired = _verbPalette.isOpen() ? kCursorSelecting
-		: (_leftDown ? kCursorClick : _hoverCursorRes);
+	uint32 desired = _verbPalette.isOpen() ? (uint32)kCursorSelecting
+		: (_leftDown ? (uint32)kCursorClick : _hoverCursorRes);
 	if (desired == _appliedCursorRes)
 		return;
 	const Cursor *cursor = cursorFor(desired);
-	if (!cursor && desired != kCursorStandard)
+	if (!cursor && desired != (uint32)kCursorStandard)
 		cursor = cursorFor(kCursorStandard);
 	if (cursor) {
 		setCursor(*cursor);
@@ -131,6 +131,12 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 			_optionsPanels.updateHover(screenPos);
 		else
 			_mainMenu.updateHover(screenPos);
+		return;
+	}
+	if (_logic.isDialogOpen()) {
+		_hoverObjectId = 0;
+		_hoverName.clear();
+		_hoverCursorRes = kCursorStandard;
 		return;
 	}
 	if (_inventoryUI.isOpen()) {
@@ -171,7 +177,7 @@ void GamebotEngine::handleMouseMove(const Common::Point &screenPos) {
 	uint32 wanted = kCursorStandard;
 	if (hovering) {
 		const ObjectEntry *object = _initialWorld.findObject(hit.objectId);
-		wanted = (object && object->hotCursor) ? object->hotCursor : kCursorHot;
+		wanted = (object && object->hotCursor) ? object->hotCursor : (uint32)kCursorHot;
 	}
 	_hoverCursorRes = wanted;
 }
@@ -206,6 +212,7 @@ void GamebotEngine::runMenuAction(int action) {
 	case MainMenu::kActionNewGame:
 		_mainMenu.close();
 		_logic.resetGame();
+		_gameStarted = true;
 		break;
 	case MainMenu::kActionLoad:
 		_optionsPanels.open(OptionsPanels::kPanelLoad);
@@ -224,6 +231,10 @@ void GamebotEngine::runMenuAction(int action) {
 		break;
 	case MainMenu::kActionQuit:
 		quitGame();
+		break;
+	case MainMenu::kActionReturn:
+		if (_mainMenu.isOpen() && isGameStarted())
+			_mainMenu.close();
 		break;
 	default:
 		break;
@@ -267,7 +278,7 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 			if (_linkedObject) {
 				uint32 linked = _linkedObject;
 				linkObject(0);
-				_logic.performVerb(item, kVerbUse, linked);
+				_logic.performVerb(item, kVerbUseInventory, linked);
 			} else {
 				linkObject(item);
 			}
@@ -325,6 +336,30 @@ void GamebotEngine::handleLeftUp(const Common::Point &screenPos) {
 			_logic.interactWith(target, verb);
 		return;
 	}
+
+	// In the original engine (MouseSys.cpp), when a specific interactable
+	// object is under the cursor (ObjectCaptured), the evMouseLButtonUp
+	// event is sent directly to that object and NOT broadcast to other
+	// objects' action tables. Only clicks on empty space (no captured
+	// object) trigger the global broadcast that reaches catch-all rules.
+	// Replicate this: check hit test first; if an object is hit, process
+	// it via normal click handling and skip global rules.
+	if (!_logic.isBusy() && !_inventoryUI.isOpen() && !_logic.isDialogOpen()) {
+		Common::Point phasePos(screenPos.x + _world.origin().x,
+							   screenPos.y + _world.origin().y);
+		HitResult hit;
+		if (!_world.hitTest(phasePos, hit)) {
+			// No specific object hit — dispatch global button-up rules
+			// (used by minigames like the domino board, and catch-all
+			// phrases like C13P30's "fosfatina" for empty-space clicks)
+			_logic.dispatchDirectEvent(kEventMouseLButtonUp, 0, 0, _linkedObject);
+			if (_linkedObject) {
+				linkObject(0);
+				return;
+			}
+		}
+	}
+
 	handleMouseClick(screenPos);
 }
 
@@ -347,6 +382,9 @@ void GamebotEngine::drawHoverName(Graphics::Screen *screen) const {
 }
 
 bool GamebotEngine::playVideo(uint32 flicResId) {
+	_sounds.stopAll();
+	debugC(kDebugEvents, "Playing FLIC video %08x", flicResId);
+	
 	const ResourceEntry *e = _resources.findByResId(flicResId);
 	if (!e || e->type != kResAnimationFlic) {
 		warning("Video %08x not found", flicResId);
@@ -419,6 +457,8 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 	// The original restore after a video fades from black into the
 	// phase palette
 	fadeIn(_world.palette());
+	if (_world.musicCode())
+		_sounds.playMusic(_world.musicCode());
 	return true;
 }
 
@@ -488,12 +528,22 @@ void GamebotEngine::setMasterById(uint32 characterId) {
 }
 
 bool GamebotEngine::gotoPhase(uint32 phaseId) {
+	// Stop any walking, pending verbs, and character sounds before fading out
+	_mortadelo.stopWalking();
+	_filemon.stopWalking();
+	_both.stopWalking();
+	_sounds.stopSFX();
+	_logic.cancelPendingVerb();
+
 	// Every phase change fades the screen to black first, as the
 	// original MainControl does before switching
 	if (_world.currentPhaseId())
 		fadeOut();
 	if (!_world.gotoPhase(phaseId))
 		return false;
+
+	// Stop any residual SFX after fade
+	_sounds.stopSFX();
 
 	// Rule-driven object changes persist across phase loads
 	_logic.applyObjectStates();
@@ -542,9 +592,11 @@ bool GamebotEngine::gotoPhase(uint32 phaseId) {
 				const ObjectEntry &object = _initialWorld.object(layer.objectFirst + o);
 				if (object.objectId < 0x100)
 					continue;
-				const ResourceEntry *flic = _resources.findResource(object.objectId, kResAnimationFlic);
-				if (flic && playVideo(flic->resId))
-					_logic.onAnimationEnded(flic->resId);
+				if (_resources.onlyHasResourceType(object.objectId, kResAnimationFlic)) {
+					const ResourceEntry *flic = _resources.findResource(object.objectId, kResAnimationFlic);
+					if (flic && playVideo(flic->resId))
+						_logic.onAnimationEnded(flic->resId);
+				}
 			}
 		}
 	}
@@ -637,8 +689,11 @@ Common::Error GamebotEngine::run() {
 				if (_logic.skipCutscene())
 					break;
 				if (!_logic.isDialogOpen() && !_logic.isBusy() && !_mainMenu.isOpen()) {
-					_verbPalette.close();
-					_inventoryUI.toggle();
+					if (master().objectId() == kCharMortadelo || 
+					    (master().objectId() == kCharFilemon && !secondCharacter())) {
+						_verbPalette.close();
+						_inventoryUI.toggle();
+					}
 				}
 				break;
 			case Common::EVENT_KEYDOWN:
@@ -654,12 +709,14 @@ Common::Error GamebotEngine::run() {
 				else if (e.kbd.keycode == Common::KEYCODE_ESCAPE) {
 					if (_optionsPanels.isOpen())
 						_optionsPanels.close();
-					else if (_mainMenu.isOpen())
-						_mainMenu.close();
-					else
+					else if (_mainMenu.isOpen()) {
+						if (isGameStarted())
+							_mainMenu.close();
+					} else
 						_mainMenu.open();
 				}
 				break;
+
 			default:
 				break;
 			}
@@ -701,12 +758,12 @@ Common::Error GamebotEngine::run() {
 		}
 
 		_world.draw(_screen, &master(), secondCharacter());
-		drawHoverName(_screen);
-		_logic.writer().draw(_screen);
-		_logic.drawDialog(_screen);
 		_changerBadge.draw(_screen);
 		_verbPalette.draw(_screen);
 		_inventoryUI.draw(_screen);
+		drawHoverName(_screen);
+		_logic.writer().draw(_screen);
+		_logic.drawDialog(_screen);
 		_mainMenu.draw(_screen);
 		_optionsPanels.draw(_screen);
 		limiter.delayBeforeSwap();

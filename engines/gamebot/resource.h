@@ -131,6 +131,7 @@ public:
 
 	// First entry of the given object with the given type, or nullptr
 	const ResourceEntry *findResource(uint32 objectId, ResourceType type) const;
+	bool onlyHasResourceType(uint32 objectId, ResourceType type) const;
 
 	// Entry with the given resource id, or nullptr (linear search)
 	const ResourceEntry *findByResId(uint32 resId) const;
@@ -253,6 +254,7 @@ public:
 	// The phase containing the given object (e.g. the characters at
 	// boot time), or 0
 	uint32 phaseContaining(uint32 objectId) const;
+	bool isLayer0Object(uint32 objectId) const;
 
 private:
 	Common::Array<PhaseEntry> _phases;

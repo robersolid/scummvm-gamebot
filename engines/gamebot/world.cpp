@@ -104,6 +104,7 @@ bool World::loadPhaseInit(uint32 phaseId) {
 	// script can still change it through the same message
 	_fxCode = READ_LE_UINT32(data + 12);
 	initWeather();
+	g_engine->sounds().stopAll();
 	if (_musicCode)
 		g_engine->sounds().playMusic(_musicCode);
 	else
@@ -286,6 +287,7 @@ void World::addDrawItem(const ObjectEntry &object, uint16 layer) {
 			if (data) {
 				Hotspot hotspot;
 				hotspot.objectId = object.objectId;
+				hotspot.layer = layer;
 				hotspot.name = object.name;
 				hotspot.type = e.type;
 				hotspot.rect = readBlobRect(data);
@@ -446,7 +448,7 @@ void World::emitStepEffects(const DrawItem &item, const Animation &anim) const {
 		return;
 	const SequenceStep &step = anim.sequence[anim.seqPos];
 	if (step.soundCode)
-		g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType);
+		g_engine->sounds().playSound(step.soundCode, Audio::Mixer::kSFXSoundType, item.objectId);
 	if (step.textCode)
 		g_engine->logic().writer().showTextCode(step.textCode);
 }
@@ -582,31 +584,60 @@ void World::pauseObjectAnims(uint32 objectId, bool paused) {
 	}
 }
 
+bool World::hasObject(uint32 objectId) const {
+	for (uint i = 0; i < _items.size(); i++) {
+		if (_items[i].objectId == objectId)
+			return true;
+	}
+	for (uint i = 0; i < _hotspots.size(); i++) {
+		if (_hotspots[i].objectId == objectId)
+			return true;
+	}
+	return false;
+}
+
 bool World::isEnabled(uint32 objectId) const {
 	for (uint i = 0; i < _items.size(); i++) {
 		if (_items[i].objectId == objectId)
 			return _items[i].visible;
 	}
+	for (uint i = 0; i < _hotspots.size(); i++) {
+		if (_hotspots[i].objectId == objectId)
+			return _hotspots[i].enabled;
+	}
 	return false;
 }
 
 void World::setEnabled(uint32 objectId, bool enabled) {
+	bool found = false;
 	// The interaction areas follow the object in and out of layer 0
 	for (uint i = 0; i < _hotspots.size(); i++) {
-		if (_hotspots[i].objectId == objectId)
+		if (_hotspots[i].objectId == objectId) {
 			_hotspots[i].enabled = enabled;
+			found = true;
+		}
 	}
 	// The original moves disabled objects to layer 0; visibility is
 	// the observable effect for both drawing and hit tests
 	for (uint i = 0; i < _items.size(); i++) {
 		if (_items[i].objectId == objectId) {
 			_items[i].visible = enabled;
-			debugC(kDebugActions, "Object %08x %s", objectId, enabled ? "enabled" : "disabled");
-			return;
+			if (!enabled) {
+				g_engine->sounds().stopSoundByObject(objectId);
+				if (_items[i].activeAnim >= 0) {
+					_items[i].anims[_items[i].activeAnim].running = false;
+					_items[i].activeAnim = -1;
+				}
+			}
+			found = true;
 		}
 	}
-	debugC(kDebugActions, "Object %08x not in this phase (%s ignored)",
-		objectId, enabled ? "enable" : "disable");
+	if (found) {
+		debugC(kDebugActions, "Object %08x %s", objectId, enabled ? "enabled" : "disabled");
+	} else {
+		debugC(kDebugActions, "Object %08x not in this phase (%s ignored)",
+			objectId, enabled ? "enable" : "disable");
+	}
 }
 
 // Jumps the running event animation to its end (fast-forward while
@@ -620,6 +651,8 @@ bool World::skipEventAnimation() {
 		Animation &anim = item.anims[item.activeAnim];
 		if (!anim.running || !anim.notifyEnd)
 			continue;
+		
+		g_engine->sounds().stopSoundByObject(item.objectId);
 		uint32 resId = anim.resId;
 		anim.running = false;
 		anim.seqPos = 0;
@@ -637,6 +670,9 @@ bool World::skipEventAnimation() {
 }
 
 bool World::startAnimation(uint32 objectId, uint32 resId) {
+	if (!g_engine->logic().isObjectEnabled(objectId))
+		return false;
+
 	for (uint i = 0; i < _items.size(); i++) {
 		DrawItem &item = _items[i];
 		if (item.objectId != objectId)
@@ -662,34 +698,80 @@ bool World::startAnimation(uint32 objectId, uint32 resId) {
 }
 
 bool World::hitTest(const Common::Point &pos, HitResult &result) const {
-	// Front-most first: items were stored back to front
-	for (int i = (int)_items.size() - 1; i >= 0; i--) {
-		const DrawItem &item = _items[i];
-		Common::Rect r = item.currentRect();
-		if (!item.visible || !r.contains(pos))
-			continue;
-		byte pixel = item.currentPixels()[(pos.y - r.top) * r.width() + (pos.x - r.left)];
-		if (pixel == kTransparentColor)
-			continue;
-		// Nameless items (backgrounds and scenery) don't take hits
-		if (item.name.empty())
-			continue;
-		result.objectId = item.objectId;
-		result.name = item.name;
-		result.type = (item.activeAnim >= 0) ? kResAnimationAuto : kResImage;
-		result.exitPhase = 0;
-		return true;
+	// Test from front-most layer (1) to back-most layer (N)
+	uint16 minLayer = 1;
+	uint16 maxLayer = 1;
+	for (uint i = 0; i < _items.size(); i++) {
+		if (_items[i].layer > maxLayer)
+			maxLayer = _items[i].layer;
+	}
+	for (uint i = 0; i < _hotspots.size(); i++) {
+		if (_hotspots[i].layer > maxLayer)
+			maxLayer = _hotspots[i].layer;
 	}
 
-	for (uint i = 0; i < _hotspots.size(); i++) {
-		if (!_hotspots[i].enabled || !_hotspots[i].rect.contains(pos))
-			continue;
-		result.objectId = _hotspots[i].objectId;
-		result.name = _hotspots[i].name;
-		result.type = _hotspots[i].type;
-		result.exitPhase = _hotspots[i].exitPhase;
-		return true;
+	for (uint16 l = minLayer; l <= maxLayer; l++) {
+		// Test items in layer l (front to back within the layer)
+		for (int i = (int)_items.size() - 1; i >= 0; i--) {
+			const DrawItem &item = _items[i];
+			if (item.layer != l)
+				continue;
+			Common::Rect r = item.currentRect();
+			if (!item.visible || !r.contains(pos))
+				continue;
+			const byte *pixels = item.currentPixels();
+			if (!pixels)
+				continue;
+			byte pixel = pixels[(pos.y - r.top) * r.width() + (pos.x - r.left)];
+			if (pixel == kTransparentColor)
+				continue;
+			// Nameless items (backgrounds and scenery) don't take hits
+			if (item.name.empty())
+				continue;
+			result.objectId = item.objectId;
+			result.name = item.name;
+			result.type = (item.activeAnim >= 0) ? kResAnimationAuto : kResImage;
+			result.exitPhase = 0;
+			return true;
+		}
+
+		// Test hotspots in layer l (front to back within the layer)
+		for (int i = (int)_hotspots.size() - 1; i >= 0; i--) {
+			const Hotspot &h = _hotspots[i];
+			if (h.layer != l || !h.enabled || !h.rect.contains(pos))
+				continue;
+			result.objectId = h.objectId;
+			result.name = h.name;
+			result.type = h.type;
+			result.exitPhase = h.exitPhase;
+			return true;
+		}
 	}
+
+	return false;
+}
+
+bool World::hitTestObject(uint32 objectId, const Common::Point &pos) const {
+	for (int i = (int)_hotspots.size() - 1; i >= 0; i--) {
+		if (_hotspots[i].objectId == objectId && _hotspots[i].enabled && _hotspots[i].rect.contains(pos))
+			return true;
+	}
+
+	for (int i = (int)_items.size() - 1; i >= 0; i--) {
+		const DrawItem &item = _items[i];
+		if (item.objectId != objectId || !item.visible)
+			continue;
+		Common::Rect r = item.currentRect();
+		if (!r.contains(pos))
+			continue;
+		const byte *pixels = item.currentPixels();
+		if (!pixels)
+			continue;
+		byte pixel = pixels[(pos.y - r.top) * r.width() + (pos.x - r.left)];
+		if (pixel != kTransparentColor)
+			return true;
+	}
+
 	return false;
 }
 
@@ -697,6 +779,8 @@ bool World::hitTest(const Common::Point &pos, HitResult &result) const {
 // honoring the scroll origin, clipping and the transparent color
 static void blitItem(Graphics::Screen *screen, const byte *pixels,
 		const Common::Rect &rect, const Common::Point &origin) {
+	if (!pixels)
+		return;
 	Common::Rect dest(rect);
 	dest.translate(-origin.x, -origin.y);
 	Common::Rect clipped(dest);
@@ -708,37 +792,31 @@ static void blitItem(Graphics::Screen *screen, const byte *pixels,
 	for (int y = clipped.top; y < clipped.bottom; y++) {
 		const byte *src = pixels + (y - dest.top) * srcPitch + (clipped.left - dest.left);
 		byte *dst = (byte *)screen->getBasePtr(clipped.left, y);
-		for (int x = clipped.width(); x > 0; x--, src++, dst++) {
-			if (*src != kTransparentColor)
-				*dst = *src;
+		for (int x = 0; x < clipped.width(); x++) {
+			if (src[x] != kTransparentColor)
+				dst[x] = src[x];
 		}
 	}
 }
 
-void World::draw(Graphics::Screen *screen, const Character *actor,
-		const Character *partner) {
+void World::draw(Graphics::Screen *screen, const Character *actor, const Character *partner) {
+	// Draw background color (color 0 in palette is transparent, 1 is black)
 	screen->clear(kTransparentColor);
 
-	// Items are ordered by descending layer. Each character draws
-	// after all items of its own layer: the original engine inserts
-	// them at the end of their layer's object list. When both share
+	// Characters layer alongside the scene items: within
 	// a layer the one lower on screen draws in front.
 	const Character *actors[2] = { actor, partner };
 	if (actor && partner) {
-		// A character playing a scene animation acts as scenery: the
-		// partner stays in front of it
-		if (actor->sceneAnimActive())
-			; // actor first (behind)
-		else if (partner->sceneAnimActive() ||
-				partner->layer() > actor->layer() ||
+		if (partner->layer() > actor->layer() ||
 				(partner->layer() == actor->layer() && partner->y() < actor->y())) {
 			actors[0] = partner;
 			actors[1] = actor;
 		}
 	}
 	bool drawn[2];
-	for (uint a = 0; a < 2; a++)
+	for (uint a = 0; a < 2; a++) {
 		drawn[a] = !actors[a] || !actors[a]->isLoaded() || !actors[a]->visible;
+	}
 
 	for (uint i = 0; i < _items.size(); i++) {
 		for (uint a = 0; a < 2; a++) {

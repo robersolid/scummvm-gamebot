@@ -30,9 +30,29 @@
 
 #include "gamebot/character.h"
 #include "gamebot/gamebot.h"
+#include "gamebot/logic.h"
 #include "gamebot/ui.h"
 
 namespace Gamebot {
+
+// Object codes of the panels (original MainClass.h OptObj* defines)
+enum {
+	kOptLoadPanel = 0xc100,
+	kOptLoadButton = 0xc101,
+	kOptLoadBack = 0xc102,
+	kOptLoadEntry = 0xc103,
+	kOptSavePanel = 0xc200,
+	kOptSaveButton = 0xc201,
+	kOptSaveBack = 0xc202,
+	kOptSaveEntry = 0xc203,
+	kOptOptionsPanel = 0xc300,
+	kOptBarFirst = 0xc301,       // effects, music, voices
+	kOptBarButtonFirst = 0xc304, // more/less pairs per bar
+	kOptOptionsBack = 0xc30C,
+	kOptClickSound = 0x151001
+};
+
+static const uint32 kDialogCursorRes = 0x000c0082;
 
 static const byte kTransparentColor = 0;
 
@@ -304,7 +324,13 @@ void MainMenu::updateHover(const Common::Point &screenPos) {
 
 MainMenu::Action MainMenu::handleClick(const Common::Point &screenPos) {
 	int button = hitButton(screenPos);
-	return (button >= 0) ? (Action)button : kActionNone;
+	if (button >= 0) {
+		if (button == kActionSave && !g_engine->isGameStarted())
+			return kActionNone;
+		g_engine->sounds().playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
+		return (Action)button;
+	}
+	return kActionNone;
 }
 
 void MainMenu::draw(Graphics::Screen *screen) const {
@@ -401,6 +427,7 @@ bool ChangerBadge::handleClick(const Common::Point &screenPos) {
 
 	// Spin toward the other character, then hand over control
 	_spinIndex = facing;
+	g_engine->sounds().playSound(kOptClickSound, Audio::Mixer::kSFXSoundType);
 	if (_spins[_spinIndex].frames) {
 		_spinning = true;
 		_spinStep = 0;
@@ -603,23 +630,6 @@ void InventoryUI::draw(Graphics::Screen *screen) {
 		blitImage(screen, pixels, x, y, images->rect.width(), images->rect.height());
 	}
 }
-
-// Object codes of the panels (original MainClass.h OptObj* defines)
-enum {
-	kOptLoadPanel = 0xc100,
-	kOptLoadButton = 0xc101,
-	kOptLoadBack = 0xc102,
-	kOptLoadEntry = 0xc103,
-	kOptSavePanel = 0xc200,
-	kOptSaveButton = 0xc201,
-	kOptSaveBack = 0xc202,
-	kOptSaveEntry = 0xc203,
-	kOptOptionsPanel = 0xc300,
-	kOptBarFirst = 0xc301,       // effects, music, voices
-	kOptBarButtonFirst = 0xc304, // more/less pairs per bar
-	kOptOptionsBack = 0xc30C,
-	kOptClickSound = 0x151001
-};
 
 // ScummVM volume keys matched to the three bars
 static const char *kVolumeKeys[3] = { "sfx_volume", "music_volume", "speech_volume" };

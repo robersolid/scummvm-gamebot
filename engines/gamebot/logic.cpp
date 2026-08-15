@@ -114,7 +114,10 @@ void TextWriter::showTextCode(uint32 textCode) {
 	byte *data = g_engine->resources().readBlob(*e);
 	if (!data)
 		return;
-	showString(Common::String((const char *)data, e->size));
+	uint32 textLen = e->size;
+	while (textLen > 0 && data[textLen - 1] == '\0')
+		textLen--;
+	showString(Common::String((const char *)data, textLen));
 	delete[] data;
 }
 
@@ -202,7 +205,26 @@ void Logic::removeFromInventory(uint32 objectId) {
 	debugC(kDebugActions, "Object %08x removed from the inventory", objectId);
 }
 
+bool Logic::isObjectEnabled(uint32 objectId) const {
+	if (isInInventory(objectId))
+		return true;
+	if (g_engine->world().hasObject(objectId))
+		return g_engine->world().isEnabled(objectId);
+	if (_objectEnabled.contains(objectId))
+		return _objectEnabled.getVal(objectId);
+	if (g_engine->initialWorld().isLayer0Object(objectId))
+		return false;
+	return true;
+}
+
 void Logic::setObjectEnabled(uint32 objectId, bool enabled) {
+	if (enabled) {
+		// An item that is in the player's inventory or already placed elsewhere cannot be re-enabled in the scene
+		if (isInInventory(objectId))
+			return;
+		if (objectId == 0x05140006 && isObjectEnabled(0x05160005)) // C05P14Tuberia2 placed as C05P16Tuberia
+			return;
+	}
 	_objectEnabled[objectId] = enabled;
 	g_engine->world().setEnabled(objectId, enabled);
 }
@@ -288,6 +310,7 @@ static uint32 verbEvent(Verb verb) {
 	case kVerbLook: return kEventObjLookNow;
 	case kVerbOpen: return kEventObjOpenNow;
 	case kVerbLeave: return kEventObjLeaveNow;
+	case kVerbUseInventory: return kEventObjUsarInvent;
 	default: return kEventObjUseNow;
 	}
 }
@@ -311,9 +334,14 @@ void Logic::interactWith(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 }
 
 void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
-	// Taking a takeable object plays the gesture first; the take event
-	// and the pickup fire at HALF the animation, as the original posts
-	// the CogerYa from the gesture's middle frame
+	uint32 eventId = verbEvent(verb);
+	uint matched = dispatchEvent(eventId, objectId, linkedObjectId);
+	if (matched)
+		return;
+
+	// Taking a takeable object without a custom rule plays the generic gesture first;
+	// the pickup fires at HALF the animation, as the original posts the CogerYa from
+	// the gesture's middle frame
 	if (verb == kVerbTake) {
 		const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
 		if (object && (object->flags & ObjectEntry::kFlagTakeable)) {
@@ -327,23 +355,17 @@ void Logic::performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId) {
 				_pendingTake = objectId;
 				return;
 			}
-			dispatchEvent(kEventObjTakeNow, objectId, 0);
 			addToInventory(objectId);
 			return;
 		}
 	}
 
-	uint32 eventId = verbEvent(verb);
-	uint matched = dispatchEvent(eventId, objectId, linkedObjectId);
-
-	if (!matched) {
-		// No rule handled the verb: the original answers with a
-		// generic "I can't do that" phrase chosen by the TCAU flags
-		const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
-		debugC(kDebugActions, "No rule for %s on %08x, generic response",
-			eventName(eventId) ? eventName(eventId) : "?", objectId);
-		sayGenericResponse(eventId, object ? object->impossibleResponses : 0);
-	}
+	// No rule handled the verb: the original answers with a
+	// generic "I can't do that" phrase chosen by the TCAU flags
+	const ObjectEntry *object = g_engine->initialWorld().findObject(objectId);
+	debugC(kDebugActions, "No rule for %s on %08x, generic response",
+		eventName(eventId) ? eventName(eventId) : "?", objectId);
+	sayGenericResponse(eventId, object ? object->impossibleResponses : 0);
 }
 
 // Generic response phrase table of the original Character.cpp: per
@@ -475,7 +497,11 @@ void Logic::update(uint32 millis) {
 	}
 }
 
-uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
+uint Logic::dispatchDirectEvent(uint32 eventId, uint32 param1, uint32 param2, uint32 lParam) {
+	return dispatchEvent(eventId, param1, param2, lParam);
+}
+
+uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2, uint32 lParam) {
 	if (s_dispatchDepth > 8) {
 		warning("Action rule chain too deep, stopping at %s", eventName(eventId));
 		return 0;
@@ -483,9 +509,20 @@ uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
 	s_dispatchDepth++;
 
 	// Every object's rule table sees every event, as in the original
-	// dispatch; a rule matches on the event id and its parameters
+	// Snapshot the active objects and matching rules for this event
+	// before running actions, so that state changes made by one object
+	// (e.g. enabling Seiscientos2 and disabling Seiscientos1) do not
+	// cause subsequent objects to falsely trigger on the SAME event.
+	// Furthermore, in the original VisualPhase::Dispatch, once an object
+	// handles an evObj* event, processing stops (DoCheck returns 1).
 	ActionFile &actions = g_engine->actions();
-	uint matched = 0;
+	struct Match {
+		uint ruleIndex;
+		uint32 owner;
+	};
+	Common::Array<Match> matchedRules;
+	uint32 handledOwner = 0;
+
 	for (uint i = 0; i < actions.ruleCount(); i++) {
 		const ActionRule &rule = actions.rule(i);
 		if (rule.eventId != eventId || rule.eventParam1 != param1)
@@ -494,17 +531,35 @@ uint Logic::dispatchEvent(uint32 eventId, uint32 param1, uint32 param2) {
 		// object of a use-with) only fires on an exact match
 		if (rule.eventParam2 && rule.eventParam2 != param2)
 			continue;
-		if (!checkConditions(rule, actions.ruleOwner(i), param2))
+
+		uint32 owner = actions.ruleOwner(i);
+		if (owner >= 0x100 && !isObjectEnabled(owner))
 			continue;
-		debugC(kDebugActions, "Rule: on %s(%x,%x) do %s(%x,%x,%x)",
-			eventName(eventId) ? eventName(eventId) : "?", param1, param2,
+
+		if (handledOwner && handledOwner != owner)
+			continue;
+
+		if (!checkConditions(rule, owner, lParam))
+			continue;
+
+		Match m;
+		m.ruleIndex = i;
+		m.owner = owner;
+		matchedRules.push_back(m);
+		handledOwner = owner;
+	}
+
+	for (uint i = 0; i < matchedRules.size(); i++) {
+		const ActionRule &rule = actions.rule(matchedRules[i].ruleIndex);
+		uint32 owner = matchedRules[i].owner;
+		debugC(kDebugActions, "Rule: on %s(%x,%x) [owner=%08x] do %s(%x,%x,%x)",
+			eventName(eventId) ? eventName(eventId) : "?", param1, param2, owner,
 			actionName(rule.actionId) ? actionName(rule.actionId) : "?",
 			rule.actionParam1, rule.actionParam2, rule.actionParam3);
-		runAction(rule, actions.ruleOwner(i));
-		matched++;
+		runAction(rule, owner);
 	}
 	s_dispatchDepth--;
-	return matched;
+	return matchedRules.size();
 }
 
 bool Logic::checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam) {
@@ -519,18 +574,14 @@ bool Logic::checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam)
 		uint32 arg = rule.condArgs[c] ? rule.condArgs[c] : owner;
 		switch (condition & 0xff) {
 		case kIfEnabled:
-			result = g_engine->world().isEnabled(arg);
+			result = isObjectEnabled(arg);
 			break;
 		case kIfInInventory:
 			result = isInInventory(arg);
 			break;
-		case kIfInBounds: {
-			// The pointer must rest inside the object's bounds
-			HitResult hit;
-			result = g_engine->world().hitTest(g_engine->lastMousePhasePos(), hit) &&
-				hit.objectId == arg;
+		case kIfInBounds:
+			result = g_engine->world().hitTestObject(arg, g_engine->lastMousePhasePos());
 			break;
-		}
 		case kIfLParam:
 			result = (rule.condArgs[c] == lParam);
 			break;
@@ -572,18 +623,25 @@ void Logic::startEventAnim(const ResourceEntry &e) {
 }
 
 void Logic::runAction(const ActionRule &rule, uint32 owner) {
+	if ((rule.actionId & 0xFF000000) != 0 || rule.actionId >= 0x100) {
+		handleMessage(rule.actionId, rule.actionParam1, rule.actionParam2, owner);
+		return;
+	}
+
 	switch (rule.actionId) {
 	case kActionSendMsg:
 		handleMessage(rule.actionParam1, rule.actionParam2, rule.actionParam3, owner);
 		break;
 	case kActionStartAnimation: {
 		const ResourceEntry *e = g_engine->resources().findByResId(rule.actionParam1);
-		if (!e)
+		if (!e) {
 			warning("Animation %08x not found", rule.actionParam1);
-		else if (e->type == kResAnimationFlic)
+		} else if (e->type == kResAnimationFlic) {
 			g_engine->playVideo(rule.actionParam1);
-		else
+			onAnimationEnded(rule.actionParam1);
+		} else {
 			startEventAnim(*e);
+		}
 		break;
 	}
 	case kActionEnable:
@@ -593,7 +651,6 @@ void Logic::runAction(const ActionRule &rule, uint32 owner) {
 		break;
 	case kActionDisable:
 		setObjectEnabled(owner, false);
-		removeFromInventory(owner);
 		break;
 	case kActionPhraseOn:
 		// The phrase's owner freezes its ambient animations while
@@ -629,10 +686,12 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 		break;
 	case kEventObjActivateAnim: {
 		const ResourceEntry *e = g_engine->resources().findByResId(param2);
-		if (e && e->type == kResAnimationFlic)
+		if (e && e->type == kResAnimationFlic) {
 			g_engine->playVideo(param2);
-		else if (e)
+			onAnimationEnded(param2);
+		} else if (e) {
 			startEventAnim(*e);
+		}
 		break;
 	}
 	case kEventDialogActivate:
@@ -678,7 +737,20 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 	case kEventFXStartEffect:
 		g_engine->world().setWeather(param2);
 		break;
-	case 0x09000002: // evDialogSetFrase: toggle a sentence by text id
+	case kEventSoundPlayPop:
+		g_engine->sounds().playSound(param2, Audio::Mixer::kSFXSoundType, owner);
+		break;
+	case kEventTextWriteCode:
+		_writer.showTextCode(param2);
+		break;
+	case kEventTextWriteStr: {
+		const ResourceEntry *e = g_engine->resources().findByResId(param2);
+		if (e && e->type == kResText)
+			_writer.showTextCode(param2);
+		break;
+	}
+	case kEventDialogSetFrase: { // evDialogSetFrase: toggle a sentence by text id
+		bool found = false;
 		for (auto &dialog : _dialogs) {
 			for (uint i = 0; i < dialog._value.size(); i++) {
 				if (dialog._value[i].textId == param2) {
@@ -686,10 +758,40 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 						dialog._value[i].flags |= kDialogActive;
 					else
 						dialog._value[i].flags &= ~kDialogActive;
+					found = true;
+					break;
 				}
 			}
+			if (found) break;
+		}
+
+		if (!found) {
+			// Dialog not loaded yet; load all unloaded dialogs until we find it.
+			ResourceFile *sources[] = { &g_engine->dialogFile(), &g_engine->resources() };
+			for (int s = 0; s < 2 && !found; s++) {
+				for (uint k = 0; k < sources[s]->count(); k++) {
+					const ResourceEntry &e = sources[s]->entry(k);
+					if (e.type == kResDialog && !_dialogs.contains(e.resId)) {
+						loadDialog(e.resId);
+						for (uint i = 0; i < _dialogs[e.resId].size(); i++) {
+							if (_dialogs[e.resId][i].textId == param2) {
+								if (param3)
+									_dialogs[e.resId][i].flags |= kDialogActive;
+								else
+									_dialogs[e.resId][i].flags &= ~kDialogActive;
+								found = true;
+								break;
+							}
+						}
+						if (found) break;
+					}
+				}
+			}
+			if (!found)
+				warning("evDialogSetFrase: sentence %08x not found in any dialog", param2);
 		}
 		break;
+	}
 	default:
 		break;
 	}
@@ -720,7 +822,10 @@ bool Logic::skipCutscene() {
 		g_engine->filemon().finishSceneAnim();
 		return true;
 	}
-	return g_engine->world().skipEventAnimation();
+	if (g_engine->world().skipEventAnimation()) {
+		return true;
+	}
+	return false;
 }
 
 void Logic::onPhraseEnded() {
@@ -766,8 +871,9 @@ void Logic::onTakeGestureHalf() {
 		return;
 	uint32 object = _pendingTake;
 	_pendingTake = 0;
-	dispatchEvent(kEventObjTakeNow, object, 0);
-	addToInventory(object);
+	uint matched = dispatchEvent(kEventObjTakeNow, object, 0);
+	if (!matched)
+		addToInventory(object);
 }
 
 void Logic::onAnimationEnded(uint32 resId) {
@@ -780,6 +886,7 @@ void Logic::onAnimationEnded(uint32 resId) {
 		// The end still reaches the rule tables: chains like Momiez's
 		// password hang exactly on the answer animation's end
 	}
+
 	dispatchEvent(kEventObjAnimEnded, resId, 0);
 }
 
@@ -948,7 +1055,10 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 		byte *data = g_engine->resources().readBlob(*e);
 		if (!data)
 			continue;
-		Common::U32String text(Common::String((const char *)data, e->size), Common::kISO8859_1);
+		uint32 textLen = e->size;
+		while (textLen > 0 && data[textLen - 1] == '\0')
+			textLen--;
+		Common::U32String text(Common::String((const char *)data, textLen), Common::kISO8859_1);
 		delete[] data;
 		text = reduceStr(font, text, screen->w - 8);
 		font->drawString(screen, text, 5, y + 1, screen->w - 8, dark);

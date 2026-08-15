@@ -39,7 +39,7 @@ SoundManager::~SoundManager() {
 	stopAll();
 }
 
-bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type) {
+bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type, uint32 objectId) {
 	ResourceFile &res = g_engine->resources();
 	const ResourceEntry *e = res.findByResId(resId);
 	if (!e || (e->type != kResSound && e->type != kResFXSound)) {
@@ -66,6 +66,7 @@ bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type) {
 	// buffers do; each keeps its own handle for state queries
 	WatchedSound watched;
 	watched.resId = resId;
+	watched.objectId = objectId;
 	g_engine->_mixer->playStream(type, &watched.handle, stream);
 	_soundHandle = watched.handle;
 	_watched.push_back(watched);
@@ -85,6 +86,15 @@ bool SoundManager::isSoundPlaying(uint32 resId) const {
 void SoundManager::stopSound(uint32 resId) {
 	for (uint i = 0; i < _watched.size(); i++) {
 		if (_watched[i].resId == resId)
+			g_engine->_mixer->stopHandle(_watched[i].handle);
+	}
+}
+
+void SoundManager::stopSoundByObject(uint32 objectId) {
+	if (!objectId)
+		return;
+	for (uint i = 0; i < _watched.size(); i++) {
+		if (_watched[i].objectId == objectId)
 			g_engine->_mixer->stopHandle(_watched[i].handle);
 	}
 }
@@ -115,7 +125,7 @@ bool SoundManager::playMusic(uint32 resId) {
 
 	ResourceFile &res = g_engine->resources();
 	const ResourceEntry *e = res.findByResId(resId);
-	if (!e || e->type != kResMusic) {
+	if (!e || (e->type != kResMusic && e->type != kResSound && e->type != kResFXSound)) {
 		debugC(kDebugSound, "Music %08x not found", resId);
 		return false;
 	}
@@ -140,8 +150,16 @@ void SoundManager::stopMusic() {
 	_currentMusic = 0;
 }
 
-void SoundManager::stopAll() {
+void SoundManager::stopSFX() {
 	stopSound();
+	for (uint i = 0; i < _watched.size(); i++) {
+		g_engine->_mixer->stopHandle(_watched[i].handle);
+	}
+	_watched.clear();
+}
+
+void SoundManager::stopAll() {
+	stopSFX();
 	stopMusic();
 }
 

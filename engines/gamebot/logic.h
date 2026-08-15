@@ -37,7 +37,17 @@ namespace Gamebot {
 
 // Event codes used by the action tables (from the original Events.h)
 enum EventCode {
+	kEventMouseLButtonUp = 0x04000004,
+	kEventSoundPlayPop = 0x07000004,
+	kEventSoundPopEnded = 0x07000020,
+	kEventOptionsActivate = 0x08000001,
 	kEventDialogActivate = 0x09000001,
+	kEventDialogSetFrase = 0x09000002,
+	kEventTextWriteCode = 0x0A000004,
+	kEventTextWriteStr = 0x0A000010,
+	kEventTextClean = 0x0A000020,
+	kEventFXStartEffect = 0x0C000001,
+	kEventAppPhaseChange = 0x0D000002,
 	kEventObjToInventory = 0x0E000001,
 	kEventObjActivateAnim = 0x0E000002,
 	kEventObjAnimEnded = 0x0E000004,
@@ -51,11 +61,6 @@ enum EventCode {
 	kEventObjLookNow = 0x0E200000,
 	kEventObjOpenNow = 0x0E400000,
 	kEventObjUseNow = 0x0E800000,
-	kEventSoundPopEnded = 0x07000020,
-	kEventOptionsActivate = 0x08000001,
-	kEventTextClean = 0x0A000020,
-	kEventFXStartEffect = 0x0C000001,
-	kEventAppPhaseChange = 0x0D000002,
 	kEventPersSetMaster = 0x0F000100,
 	kEventPersWalkTo = 0x0F020000
 };
@@ -87,7 +92,8 @@ enum Verb {
 	kVerbTalk,
 	kVerbLook,
 	kVerbOpen,
-	kVerbLeave
+	kVerbLeave,
+	kVerbUseInventory
 };
 
 // Dialog sentence flags (original DialogMaster.cpp)
@@ -158,6 +164,7 @@ public:
 
 	// Persistent object state: rules enable and disable objects and
 	// the change must survive leaving and re-entering the phase
+	bool isObjectEnabled(uint32 objectId) const;
 	void setObjectEnabled(uint32 objectId, bool enabled);
 	// Applies the accumulated overrides to a freshly loaded phase
 	void applyObjectStates();
@@ -201,10 +208,12 @@ public:
 	void onAnimationEnded(uint32 resId);
 	void onTakeGestureHalf();
 
-private:
-	// Dispatches an event through the rule table of an object.
+	// Dispatches an event through the rule tables.
 	// Returns the number of rules that matched and ran.
-	uint dispatchEvent(uint32 eventId, uint32 param1, uint32 param2);
+	uint dispatchDirectEvent(uint32 eventId, uint32 param1, uint32 param2, uint32 lParam = 0);
+
+private:
+	uint dispatchEvent(uint32 eventId, uint32 param1, uint32 param2, uint32 lParam = 0);
 	bool checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam);
 	void runAction(const ActionRule &rule, uint32 owner);
 	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32 owner = 0);

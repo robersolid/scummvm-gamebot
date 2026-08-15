@@ -60,6 +60,7 @@ public:
 	void update(uint32 millis); // advances animations
 
 	// Game state changes driven by the action rules
+	bool hasObject(uint32 objectId) const;
 	bool isEnabled(uint32 objectId) const;
 	void setEnabled(uint32 objectId, bool enabled);
 	bool startAnimation(uint32 objectId, uint32 resId);
@@ -105,6 +106,7 @@ public:
 
 	// Pixel-perfect test in phase coordinates, front to back
 	bool hitTest(const Common::Point &pos, HitResult &result) const;
+	bool hitTestObject(uint32 objectId, const Common::Point &pos) const;
 
 	uint32 currentPhaseId() const { return _phaseId; }
 	int16 phaseWidth() const { return _phaseWidth; }
@@ -150,8 +152,10 @@ private:
 		bool animsPaused = false;
 
 		const byte *currentPixels() const {
-			if (activeAnim >= 0) {
+			if (activeAnim >= 0 && (uint)activeAnim < anims.size()) {
 				const Animation &a = anims[activeAnim];
+				if (!a.running && !staticPixels)
+					return nullptr;
 				uint32 imageIndex = a.sequence.empty() ? 1 : a.sequence[a.seqPos].imageIndex;
 				if (imageIndex < 1 || imageIndex > a.params.imageCount)
 					imageIndex = 1;
@@ -168,6 +172,7 @@ private:
 
 	struct Hotspot {
 		uint32 objectId = 0;
+		uint16 layer = 0;
 		Common::String name;
 		ResourceType type = kResUnknown;
 		Common::Rect rect;

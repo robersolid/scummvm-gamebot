@@ -125,6 +125,20 @@ const ResourceEntry *ResourceFile::findResource(uint32 objectId, ResourceType ty
 	return nullptr;
 }
 
+bool ResourceFile::onlyHasResourceType(uint32 objectId, ResourceType type) const {
+	int i = findObject(objectId);
+	if (i < 0)
+		return false;
+	bool hasType = false;
+	for (; i < (int)_entries.size() && _entries[i].objectId == objectId; i++) {
+		if (_entries[i].type == type)
+			hasType = true;
+		else
+			return false;
+	}
+	return hasType;
+}
+
 const ResourceEntry *ResourceFile::findByResId(uint32 resId) const {
 	for (uint i = 0; i < _entries.size(); i++) {
 		if (_entries[i].resId == resId)
@@ -237,7 +251,8 @@ bool WorldFile::load(const Common::Path &name) {
 
 		char nameBuffer[33] = {};
 		_file.read(nameBuffer, 32);
-		o.name = nameBuffer;
+		nameBuffer[32] = '\0';
+		o.name = Common::String(nameBuffer);
 
 		o.targetX = _file.readUint16LE();
 		o.targetY = _file.readUint16LE();
@@ -275,6 +290,20 @@ uint32 WorldFile::phaseContaining(uint32 objectId) const {
 		}
 	}
 	return 0;
+}
+
+bool WorldFile::isLayer0Object(uint32 objectId) const {
+	for (uint p = 0; p < _phases.size(); p++) {
+		const PhaseEntry &phase = _phases[p];
+		if (phase.layerCount > 0) {
+			const LayerEntry &layer = _layers[phase.layerFirst];
+			for (uint32 o = 0; o < layer.objectCount; o++) {
+				if (_objects[layer.objectFirst + o].objectId == objectId)
+					return true;
+			}
+		}
+	}
+	return false;
 }
 
 const ObjectEntry *WorldFile::findObject(uint32 objectId) const {
