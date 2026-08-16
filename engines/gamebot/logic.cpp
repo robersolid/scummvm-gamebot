@@ -114,9 +114,9 @@ void TextWriter::showTextCode(uint32 textCode) {
 	byte *data = g_engine->resources().readBlob(*e);
 	if (!data)
 		return;
-	uint32 textLen = e->size;
-	while (textLen > 0 && data[textLen - 1] == '\0')
-		textLen--;
+	uint32 textLen = 0;
+	while (textLen < e->size && data[textLen] != '\0')
+		textLen++;
 	showString(Common::String((const char *)data, textLen));
 	delete[] data;
 }
@@ -1056,9 +1056,9 @@ void Logic::drawDialog(Graphics::Screen *screen) const {
 		byte *data = g_engine->resources().readBlob(*e);
 		if (!data)
 			continue;
-		uint32 textLen = e->size;
-		while (textLen > 0 && data[textLen - 1] == '\0')
-			textLen--;
+		uint32 textLen = 0;
+		while (textLen < e->size && data[textLen] != '\0')
+			textLen++;
 		Common::U32String text(Common::String((const char *)data, textLen), Common::kISO8859_1);
 		delete[] data;
 		text = reduceStr(font, text, screen->w - 8);
