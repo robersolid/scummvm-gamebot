@@ -698,7 +698,11 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 		activateDialog(param2, owner);
 		break;
 	case kEventAppPhaseChange:
-		// The intro chain jumps to 0x99, which is the main menu
+		// Phase 0x99 in the original engine is the signal to open the main menu
+		if (param2 == 0x99) {
+			g_engine->mainMenu().open();
+			return;
+		}
 		if (!g_engine->gotoPhase(param2)) {
 			debugC(kDebugActions, "Phase %08x is the menu panel", param2);
 			g_engine->mainMenu().open();
@@ -788,7 +792,7 @@ void Logic::handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32
 				}
 			}
 			if (!found)
-				warning("evDialogSetFrase: sentence %08x not found in any dialog", param2);
+				debugC(2, kDebugActions, "evDialogSetFrase: sentence %08x not found in any dialog", param2);
 		}
 		break;
 	}
