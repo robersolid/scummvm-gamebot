@@ -22,9 +22,33 @@
 #include "gamebot/metaengine.h"
 #include "gamebot/detection.h"
 #include "gamebot/gamebot.h"
+#include "common/translation.h"
+
+namespace Gamebot {
+
+static const ADExtraGuiOptionsMap optionsList[] = {
+	{
+		GAMEOPTION_ALLOW_SKIP,
+		{
+			_s("Allow skipping cutscenes, dialogs and videos"),
+			_s("Enable skipping of videos, animations, and spoken lines with Escape, Space, or clicks (disabled by default for original game behavior)"),
+			"allow_skip",
+			false,
+			0,
+			0
+		}
+	},
+	AD_EXTRA_GUI_OPTIONS_TERMINATOR
+};
+
+} // End of namespace Gamebot
 
 const char *GamebotMetaEngine::getName() const {
 	return "gamebot";
+}
+
+const ADExtraGuiOptionsMap *GamebotMetaEngine::getAdvancedExtraGuiOptions() const {
+	return Gamebot::optionsList;
 }
 
 Common::Error GamebotMetaEngine::createInstance(OSystem *syst, Engine **engine, const ADGameDescription *desc) const {

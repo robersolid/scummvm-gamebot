@@ -35,6 +35,8 @@ enum GamebotDebugChannels {
 	kDebugSaves,
 };
 
+#define GAMEOPTION_ALLOW_SKIP GUIO_GAMEOPTIONS1
+
 extern const PlainGameDescriptor gamebotGames[];
 
 extern const ADGameDescription gameDescriptions[];

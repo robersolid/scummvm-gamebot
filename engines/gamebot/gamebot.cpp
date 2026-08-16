@@ -260,9 +260,9 @@ void GamebotEngine::handleMouseClick(const Common::Point &screenPos) {
 	if (_logic.handleDialogClick(screenPos))
 		return;
 
-	// A click on a spoken line or a scripted animation skips it and
-	// continues the chain
-	if (_logic.skipCutscene())
+	// If skipping is enabled by option, a click on a spoken line or a scripted
+	// animation skips it and continues the chain
+	if (_allowSkip && _logic.skipCutscene())
 		return;
 
 	// Scripted sequences ignore every player input, as the original
@@ -443,10 +443,11 @@ bool GamebotEngine::playVideo(uint32 flicResId) {
 
 		Common::Event event;
 		while (g_system->getEventManager()->pollEvent(event)) {
-			if (event.type == Common::EVENT_LBUTTONDOWN ||
+			if (_allowSkip && (event.type == Common::EVENT_LBUTTONDOWN ||
 					event.type == Common::EVENT_RBUTTONDOWN ||
 					(event.type == Common::EVENT_KEYDOWN &&
-					event.kbd.keycode == Common::KEYCODE_ESCAPE))
+					(event.kbd.keycode == Common::KEYCODE_ESCAPE ||
+					 event.kbd.keycode == Common::KEYCODE_SPACE))))
 				skipped = true;
 		}
 		g_system->delayMillis(10);
@@ -639,6 +640,8 @@ Common::Error GamebotEngine::run() {
 	_both.load(kCharBoth);
 	_changerBadge.load();
 
+	_allowSkip = ConfMan.hasKey("allow_skip") && ConfMan.getBool("allow_skip");
+
 	// Development aid: run semicolon-separated console commands from
 	// the config file, e.g. gamebot_exec=phases;dumpmap 0x0101
 	if (ConfMan.hasKey("gamebot_exec")) {
@@ -707,7 +710,12 @@ Common::Error GamebotEngine::run() {
 					_world.origin().x = MAX<int16>(_world.origin().x - 16, 0);
 				else if (e.kbd.keycode == Common::KEYCODE_TAB && !_logic.isBusy())
 					switchMaster();
-				else if (e.kbd.keycode == Common::KEYCODE_ESCAPE) {
+				else if (_allowSkip && e.kbd.keycode == Common::KEYCODE_SPACE) {
+					if (_logic.skipCutscene())
+						break;
+				} else if (e.kbd.keycode == Common::KEYCODE_ESCAPE) {
+					if (_allowSkip && _logic.skipCutscene())
+						break;
 					if (_optionsPanels.isOpen())
 						_optionsPanels.close();
 					else if (_mainMenu.isOpen()) {

@@ -102,6 +102,7 @@ private:
 	bool _leftDown = false;
 	uint32 _lastMouseEventTime = 0;
 	bool _gameStarted = false;
+	bool _allowSkip = false;
 
 	void loadCursor(uint32 resId, Cursor &cursor);
 	void setCursor(const Cursor &cursor);
@@ -173,9 +174,10 @@ public:
 	void fadeOut();
 	void fadeIn(const byte *target);
 
-	// Plays a full-screen FLC video (modal, skippable with a click
-	// or escape), then restores the phase palette and music
+	// Plays a full-screen FLC video (modal, skippable when allow_skip
+	// is enabled), then restores the phase palette and music
 	bool playVideo(uint32 flicResId);
+	bool allowSkip() const { return _allowSkip; }
 
 	uint32 getRandomNumber(uint maxNum) {
 		return _randomSource.getRandomNumber(maxNum);
