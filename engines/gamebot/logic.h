@@ -1,0 +1,262 @@
+/* ScummVM - Graphic Adventure Engine
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+#ifndef GAMEBOT_LOGIC_H
+#define GAMEBOT_LOGIC_H
+
+#include "common/hashmap.h"
+#include "common/serializer.h"
+#include "common/str.h"
+
+#include "gamebot/resource.h"
+
+namespace Graphics {
+class Font;
+class Screen;
+}
+
+namespace Gamebot {
+
+// Event codes used by the action tables (from the original Events.h)
+enum EventCode {
+	kEventMouseLButtonUp = 0x04000004,
+	kEventSoundPlayPop = 0x07000004,
+	kEventSoundPopEnded = 0x07000020,
+	kEventOptionsActivate = 0x08000001,
+	kEventDialogActivate = 0x09000001,
+	kEventDialogSetFrase = 0x09000002,
+	kEventTextWriteCode = 0x0A000004,
+	kEventTextWriteStr = 0x0A000010,
+	kEventTextClean = 0x0A000020,
+	kEventFXStartEffect = 0x0C000001,
+	kEventAppPhaseChange = 0x0D000002,
+	kEventObjToInventory = 0x0E000001,
+	kEventObjActivateAnim = 0x0E000002,
+	kEventObjAnimEnded = 0x0E000004,
+	kEventObjDisable = 0x0E000010,
+	kEventObjEnable = 0x0E000020,
+	kEventObjUsarInvent = 0x0E002000,
+	kEventObjArrived = 0x0E020000,
+	kEventObjLeaveNow = 0x0E040000,
+	kEventObjTalkNow = 0x0E080000,
+	kEventObjTakeNow = 0x0E100000,
+	kEventObjLookNow = 0x0E200000,
+	kEventObjOpenNow = 0x0E400000,
+	kEventObjUseNow = 0x0E800000,
+	kEventPersSetMaster = 0x0F000100,
+	kEventPersWalkTo = 0x0F020000
+};
+
+// Action codes (original VisualObject.h)
+enum ActionCode {
+	kActionSendMsg = 1,
+	kActionStartAnimation,
+	kActionEnable,
+	kActionDisable,
+	kActionPhraseOn,
+	kActionInputEnable
+};
+
+// Condition codes (original Actions.h); 0x100 negates, 0x200 = OR term
+enum ConditionCode {
+	kIfEnabled = 0x01,
+	kIfInInventory = 0x02,
+	kIfInBounds = 0x03,
+	kIfLParam = 0x04,
+	kConditionNot = 0x100,
+	kConditionOr = 0x200
+};
+
+// The verbs of the action palette
+enum Verb {
+	kVerbUse,
+	kVerbTake,
+	kVerbTalk,
+	kVerbLook,
+	kVerbOpen,
+	kVerbLeave,
+	kVerbUseInventory
+};
+
+// Dialog sentence flags (original DialogMaster.cpp)
+enum DialogFlags {
+	kDialogGoodbye = 0x0001,    // ends the conversation after this line
+	kDialogAnimation = 0x0002,  // trigger an animation instead of speaking
+	kDialogAnswer = 0x0010,     // an answer animation follows the line
+	kDialogDeactivate = 0x0100, // the line disappears once used
+	kDialogActive = 0x1000
+};
+
+struct DialogSentence {
+	uint32 textId = 0;
+	uint32 soundId = 0;
+	uint32 animId = 0;
+	uint32 flags = 0;
+};
+
+// On-screen phrase display (stand-in for the original WriterMaster,
+// which rendered with a Windows GDI font)
+class TextWriter {
+public:
+	void showTextCode(uint32 textCode);
+	void showString(const Common::String &text);
+	// Keeps the phrase visible a bit longer (while its voice plays)
+	void keepAlive(uint32 millis) {
+		if (!_text.empty() && millis + 300 > _hideTime)
+			_hideTime = millis + 300;
+	}
+	void update(uint32 millis);
+	void expire() { _hideTime = 1; }
+	void draw(Graphics::Screen *screen) const;
+	// Renders a text in the original writer style: bottom strip, up to
+	// two centered lines, yellow (or hot orange) over a double shadow
+	void drawText(Graphics::Screen *screen, const Common::String &text,
+		bool highlight) const;
+	// The 24-pixel screen font and the 19-pixel bold dialog font of
+	// the original WriterMaster
+	static const Graphics::Font *screenFont();
+	static const Graphics::Font *dialogFont();
+	bool active() const { return !_text.empty(); }
+
+private:
+	Common::String _text;
+	uint32 _hideTime = 0;
+};
+
+// Runs the data-driven action rules of Actions.act and keeps the
+// mutable game state they touch: the inventory and the per-object
+// enabled state
+class Logic {
+public:
+	// Walks the character to an object and performs a verb on arrival;
+	// linkedObjectId carries the inventory object of a use-with
+	void interactWith(uint32 objectId, Verb verb, uint32 linkedObjectId = 0);
+	// Immediately dispatches a verb event to an object's rule table
+	void performVerb(uint32 objectId, Verb verb, uint32 linkedObjectId = 0);
+	void update(uint32 millis);
+	// A fresh walk click drops the queued verb, as the original wipes
+	// its pending event before recomputing the path
+	void cancelPendingVerb() { _pendingActive = false; }
+
+	bool isInInventory(uint32 objectId) const { return _inventory.contains(objectId); }
+	void addToInventory(uint32 objectId);
+	void removeFromInventory(uint32 objectId);
+	const Common::HashMap<uint32, bool> &inventory() const { return _inventory; }
+	const Common::Array<uint32> &inventoryOrder() const { return _inventoryOrder; }
+
+	// Persistent object state: rules enable and disable objects and
+	// the change must survive leaving and re-entering the phase
+	bool isObjectEnabled(uint32 objectId) const;
+	void setObjectEnabled(uint32 objectId, bool enabled);
+	// Applies the accumulated overrides to a freshly loaded phase
+	void applyObjectStates();
+
+	// Full game state serialization (phase, character, inventory,
+	// object overrides and dialog sentence states)
+	void syncGame(Common::Serializer &s);
+
+	// Starts a fresh game: state cleared, back to the chapter 1 map
+	void resetGame();
+
+	TextWriter &writer() { return _writer; }
+	const TextWriter &writer() const { return _writer; }
+
+	// Shows a phrase spoken by the master character: text on screen,
+	// talking animation and (eventually) the voice sample
+	void sayPhrase(uint32 textCode, uint32 soundCode);
+
+	// Skips the phrase on screen: the voice stops and the follow-up
+	// chain (next line, answer animation...) runs at once. Returns
+	// false when there was nothing to skip.
+	bool skipPhrase();
+	bool skipCutscene();
+
+	// Conversations (original DialogMaster): a dialog resource holds
+	// sentences the player can pick; a picked line is spoken, may run
+	// an answer animation and reopens the list until a goodbye line
+	void activateDialog(uint32 dialogId, uint32 ownerId = 0);
+	void pickSentence(uint index);
+	bool isDialogOpen() const { return _dialogOpen; }
+
+	// True while a scripted sequence runs (a phrase on screen, a
+	// script-driven walk or an answer animation): player input that
+	// moves the characters is ignored meanwhile
+	bool isBusy() const;
+	void drawDialog(Graphics::Screen *screen) const;
+	bool handleDialogClick(const Common::Point &screenPos);
+
+	// Chain notifications
+	void onPhraseEnded();
+	void onAnimationEnded(uint32 resId);
+	void onTakeGestureHalf();
+
+	// Dispatches an event through the rule tables.
+	// Returns the number of rules that matched and ran.
+	uint dispatchDirectEvent(uint32 eventId, uint32 param1, uint32 param2, uint32 lParam = 0);
+
+private:
+	uint dispatchEvent(uint32 eventId, uint32 param1, uint32 param2, uint32 lParam = 0);
+	bool checkConditions(const ActionRule &rule, uint32 owner, uint32 lParam);
+	void runAction(const ActionRule &rule, uint32 owner);
+	void handleMessage(uint32 eventCode, uint32 param2, uint32 param3, uint32 owner = 0);
+	void sayGenericResponse(uint32 verbEventId, uint16 responseFlags);
+
+	// Loads a dialog's sentences, preferring the state in default.dlg
+	// over the pristine copy in the resource file
+	bool loadDialog(uint32 dialogId);
+	void showDialogList();
+	void endDialog();
+
+	Common::HashMap<uint32, bool> _inventory;
+	Common::Array<uint32> _inventoryOrder; // insertion order, as the original bag
+	Common::HashMap<uint32, bool> _objectEnabled; // overrides vs default.def
+	TextWriter _writer;
+	uint32 _phraseSound = 0; // voice code of the phrase on screen
+
+	// Conversation state; sentence activation persists per dialog
+	Common::HashMap<uint32, Common::Array<DialogSentence> > _dialogs;
+	uint32 _currentDialog = 0;
+	bool _dialogOpen = false;      // the sentence list is on screen
+	Common::Array<uint> _visibleSentences; // indexes of listed lines
+	uint32 _answerAnim = 0;        // NPC answer to run after the line
+	uint32 _pendingAnswerAnim = 0; // waiting for this anim to finish
+	uint32 _sentenceFlags = 0;     // flags of the picked line
+
+	// Pending walk-then-act interaction
+	uint32 _pendingObject = 0;
+	uint32 _pendingLinked = 0;
+	Verb _pendingVerb = kVerbUse;
+	bool _pendingActive = false;
+
+	// Script-driven walk: the arrival event carries the packed target
+	uint32 _scriptedWalk = 0;
+	uint32 _scriptedWalkOrient = 0;
+	// Object reaching the inventory once the take gesture ends
+	uint32 _pendingTake = 0;
+	// Rule owner whose ambient animations pause during its phrase
+	uint32 _phraseOwner = 0;
+	uint32 _dialogOwner = 0;
+	void startEventAnim(const ResourceEntry &e);
+};
+
+} // End of namespace Gamebot
+
+#endif // GAMEBOT_LOGIC_H
