@@ -23,7 +23,7 @@
 
 namespace M4 {
 
-const char *myRegLabels[IDX_COUNT] = {
+extern const char *myRegLabels[IDX_COUNT] = {
 	"timer",							//0
 	"tag",								//1
 	"layer",							//2
