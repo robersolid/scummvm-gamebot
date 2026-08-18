@@ -1905,6 +1905,11 @@ miyoo)
 	_host_cpu=arm
 	_host_alias=arm-linux
 	;;
+webos)
+	_host_os=linux
+	_host_cpu=arm
+	_host_alias=arm-webos-linux-gnueabi
+	;;
 miyoomini)
 	_host_os=linux
 	_host_cpu=arm
@@ -4009,6 +4014,19 @@ if test -n "$_host"; then
 			append_var LDFLAGS "-static-libgcc"
 			append_var LIBS "-laudio"
 			;;
+		webos)
+			_sysroot=`$CXX --print-sysroot`
+			_sdlpath=$_sysroot/usr/bin
+			append_var DEFINES  "-DWEBOS"
+			append_var CXXFLAGS "-mcpu=cortex-a9 -mtune=cortex-a53 -mfloat-abi=softfp -ffast-math -fomit-frame-pointer -ffunction-sections -fdata-sections"
+			append_var LDFLAGS  "-Wl,--as-needed,--gc-sections"
+			append_var LDFLAGS  "-Wl,-rpath,\\$\$ORIGIN/lib"
+			append_var LIBS "-ldl"
+			_optimization_level=-O3
+			_backend="webos"
+			_port_mk="backends/platform/sdl/webos/webos.mk"
+			add_line_to_config_mk 'WEBOS = 1'
+			;;
 		miyoo)
 			_sysroot=`$CXX --print-sysroot`
 			_sdlpath=$_sysroot/usr/bin
@@ -4370,6 +4388,11 @@ case $_backend in
 		;;
 	opendingux | miyoo | miyoomini | sailfish)
 		_sdlconfig=sdl-config
+		_sdl=auto
+		append_var MODULES "backends/platform/sdl"
+		;;
+	webos)
+		_sdlconfig=sdl2-config
 		_sdl=auto
 		append_var MODULES "backends/platform/sdl"
 		;;
@@ -6852,13 +6875,9 @@ if test "$_opengl_mode" != none ; then
 					;;
 			esac
 			;;
-		sailfish)
+		sailfish|switch|webos)
 		        _opengl_mode=gles2
 		        _opengl_glad=yes
-			;;
-		switch)
-			_opengl_mode=gles2
-			_opengl_glad=yes
 			;;
 		*)
 			# On all other platforms, by default don't enable OpenGL

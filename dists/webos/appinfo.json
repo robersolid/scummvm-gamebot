@@ -1,0 +1,17 @@
+{
+    "id": "org.scummvm.webos",
+    "version": "2.10.0",
+    "vendor": "ScummVM Team",
+    "type": "native",
+    "main": "scummvm",
+    "title": "ScummVM",
+    "appDescription": "Graphic adventure engine",
+    "icon": "icon.png",
+    "largeIcon": "icon160.png",
+    "iconColor": "#5c3d2e",
+    "bgColor": "#1a1a1a",
+    "cloudgame_active": true,
+    "useAllMouseButtons": true,
+    "useAllKeyboardKeys": true,
+    "supportTouchMode": "full"
+}

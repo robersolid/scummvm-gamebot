@@ -16,6 +16,12 @@ MODULE_OBJS += \
 	posix/posix.o
 endif
 
+ifdef WEBOS
+MODULE_OBJS += \
+	webos/webos-main.o \
+	webos/webos.o
+endif
+
 ifdef MACOSX
 MODULE_OBJS += \
 	macosx/macosx-main.o \

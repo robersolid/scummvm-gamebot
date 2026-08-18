@@ -95,8 +95,12 @@ SdlEventSource::SdlEventSource()
 	}
 
 #if SDL_VERSION_ATLEAST(2,0,10)
+#ifndef WEBOS
 	// ensure that touch doesn't create double-events
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+#else
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
+#endif
 #endif
 
 }

@@ -19,46 +19,49 @@
  *
  */
 
-#include "common/scummsys.h"
+#define FORBIDDEN_SYMBOL_EXCEPTION_getenv
+#define FORBIDDEN_SYMBOL_EXCEPTION_setenv
+#define FORBIDDEN_SYMBOL_EXCEPTION_putenv
 
-#if defined(POSIX) && !defined(MACOSX) && !defined(SAMSUNGTV) && !defined(MAEMO) && !defined(OPENDINGUX) && !defined(OPENPANDORA) && !defined(PLAYSTATION3) && !defined(PSP2) && !defined(NINTENDO_SWITCH)  && !defined(__EMSCRIPTEN__) && !defined(MIYOO) && !defined(MIYOOMINI) && !defined(WEBOS) && !defined(SAILFISH)
+#include <stdlib.h>
+#include <unistd.h>
 
-#include "backends/platform/sdl/posix/posix.h"
-#ifdef USE_ATARI_PLUGIN_PROVIDER
-#include "backends/plugins/atari/atari-provider.h"
-#elif defined(USE_FIREBEE_PLUGIN_PROVIDER)
-#include "backends/plugins/firebee/firebee-provider.h"
-#else
+#include "backends/platform/sdl/webos/webos.h"
 #include "backends/plugins/sdl/sdl-provider.h"
-#endif
 #include "base/main.h"
 
 int main(int argc, char *argv[]) {
+	if (!getenv("XDG_RUNTIME_DIR"))
+		setenv("XDG_RUNTIME_DIR", "/tmp/xdg", 0);
+	if (!getenv("WAYLAND_DISPLAY"))
+		setenv("WAYLAND_DISPLAY", "wayland-0", 0);
+	if (!getenv("APPID") && !getenv("WEBOS_APP_ID"))
+		setenv("APPID", "org.scummvm.webos", 0);
+	if (!getenv("SDL_WEBOS_CURSOR_SLEEP_TIME"))
+		setenv("SDL_WEBOS_CURSOR_SLEEP_TIME", "1", 0);
 
-	// Create our OSystem instance
-	g_system = new OSystem_POSIX();
+	g_system = new OSystem_SDL_Webos();
 	assert(g_system);
 
-	// Pre initialize the backend
 	g_system->init();
 
 #ifdef DYNAMIC_MODULES
-#if defined(USE_ATARI_PLUGIN_PROVIDER)
-	PluginManager::instance().addPluginProvider(new AtariPluginProvider());
-#elif defined(USE_FIREBEE_PLUGIN_PROVIDER)
-	PluginManager::instance().addPluginProvider(new FireBeePluginProvider());
-#else
 	PluginManager::instance().addPluginProvider(new SDLPluginProvider());
 #endif
-#endif
 
-	// Invoke the actual ScummVM main entry point:
-	int res = scummvm_main(argc, argv);
+	// Filter out webOS SAM launch arguments (which are passed as JSON strings starting with '{')
+	int newArgc = 0;
+	char *newArgv[128];
+	for (int i = 0; i < argc && newArgc < 127; ++i) {
+		if (argv[i] && argv[i][0] == '{')
+			continue;
+		newArgv[newArgc++] = argv[i];
+	}
+	newArgv[newArgc] = nullptr;
 
-	// Free OSystem
+	int res = scummvm_main(newArgc, newArgv);
+
 	g_system->destroy();
 
 	return res;
 }
-
-#endif
