@@ -163,13 +163,15 @@ Graphics::PixelFormat FlicDecoder::FlicVideoTrack::getPixelFormat() const {
 #define FLC_FILE_HEADER_SIZE  0x80
 
 const Graphics::Surface *FlicDecoder::FlicVideoTrack::decodeNextFrame() {
+	uint32 frameStart = _fileStream->pos();
 	// Read chunk
-	/*uint32 frameSize = */ _fileStream->readUint32LE();
+	uint32 frameSize = _fileStream->readUint32LE();
 	uint16 frameType = _fileStream->readUint16LE();
 
 	switch (frameType) {
 	case FRAME_TYPE:
 		handleFrame();
+		_fileStream->seek(frameStart + frameSize);
 		break;
 	case FLC_FILE_HEADER:
 		// Skip 0x80 bytes of file header subtracting 6 bytes of header
