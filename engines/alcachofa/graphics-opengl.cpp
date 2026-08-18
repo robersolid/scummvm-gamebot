@@ -97,16 +97,24 @@ void OpenGLTexture::update(const Surface &surface) {
 
 OpenGLRenderer::OpenGLRenderer(Point resolution) : OpenGLRendererBase(resolution) {
 	initGraphics3d(resolution.x, resolution.y);
+	applyBaseState();
+
+	if (!OpenGLContext.textureMirrorRepeatSupported) {
+		GUI::displayErrorDialog(_("Old OpenGL detected, some graphical errors will occur."));
+	}
+}
+
+// The GL state cannot be assumed to survive between frames: the
+// backend GUI pipeline or external frontends render with their own state
+// after presenting. Without re-applying it every frame, blending or depth
+// test states may be clobbered.
+void OpenGLRenderer::applyBaseState() {
 	GL_CALL(glDisable(GL_DEPTH_TEST));
 	GL_CALL(glDisable(GL_SCISSOR_TEST));
 	GL_CALL(glDisable(GL_STENCIL_TEST));
 	GL_CALL(glDisable(GL_CULL_FACE));
 	GL_CALL(glEnable(GL_BLEND));
 	GL_CALL(glDepthMask(GL_FALSE));
-
-	if (!OpenGLContext.textureMirrorRepeatSupported) {
-		GUI::displayErrorDialog(_("Old OpenGL detected, some graphical errors will occur."));
-	}
 }
 
 ScopedPtr<ITexture> OpenGLRenderer::createTexture(int32 w, int32 h, bool withMipmaps) {
@@ -191,11 +199,12 @@ void OpenGLRenderer::setViewportInner(int x, int y, int width, int height) {
 }
 
 void OpenGLRenderer::checkFirstDrawCommand() {
-	// We delay clearing the screen. It is much easier for the game
-	// to switch to a framebuffer before
 	if (!_isFirstDrawCommand)
 		return;
 	_isFirstDrawCommand = false;
+	// The backend GUI or an external frontend may have changed the GL
+	// state since the last frame, so restore base state per frame.
+	applyBaseState();
 	GL_CALL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f));
 	GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
 }

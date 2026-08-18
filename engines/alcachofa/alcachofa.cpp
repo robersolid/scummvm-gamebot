@@ -33,6 +33,9 @@
 #include "image/png.h"
 #include "video/avi_decoder.h"
 #include "video/mpegps_decoder.h"
+#ifdef USE_THEORADEC
+#include "video/theora_decoder.h"
+#endif
 
 #include "alcachofa/alcachofa.h"
 #include "alcachofa/metaengine.h"
@@ -163,10 +166,23 @@ void AlcachofaEngine::playVideo(int32 videoId) {
 	ScopedPtr<Video::VideoDecoder> decoder;
 	if (memcmp(magic, "RIFF", sizeof(magic)) == 0)
 		decoder.reset(new Video::AVIDecoder());
+#ifdef USE_THEORADEC
+	else if (memcmp(magic, "OggS", sizeof(magic)) == 0)
+		decoder.reset(new Video::TheoraDecoder());
+#endif
+	else if (memcmp(magic, "OggS", sizeof(magic)) == 0) {
+		warning("Theora video decoder not available in this build");
+		return;
+	}
 	else
 		decoder.reset(new Video::MPEGPSDecoder());
-	if (!decoder->loadStream(file)) {
+
+	if (!decoder || !decoder->loadStream(file)) {
 		game().invalidVideo(videoId, "decode video");
+		return;
+	}
+	if (decoder->getWidth() <= 0 || decoder->getHeight() <= 0) {
+		warning("Invalid video dimensions (%dx%d)", decoder->getWidth(), decoder->getHeight());
 		return;
 	}
 	decoder->setOutputPixelFormat(g_engine->renderer().getPixelFormat());

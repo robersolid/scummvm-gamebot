@@ -59,6 +59,7 @@ protected:
 	void setViewportInner(int x, int y, int width, int height) override;
 	void setBlendFunc(BlendMode blendMode); ///< just the blend-func, not texenv/shader uniform
 	void checkFirstDrawCommand();
+	void applyBaseState(); ///< re-applied per frame, backend GUI or frontends may clobber it
 
 	OpenGLTexture *_currentTexture = nullptr;
 };

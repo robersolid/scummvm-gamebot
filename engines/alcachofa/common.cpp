@@ -49,7 +49,7 @@ String reencode(const String &string, CodePage from, CodePage to) {
 	// Some spanish releases contain special characters in paths but Path does not support U32String
 	// Instead we convert to UTF8 and let the filesystem backend choose the native target encoding
 	
-	auto it = Common::find_if(string.begin(), string.end(), [] (const char v) { return v < 0; });
+	auto it = Common::find_if(string.begin(), string.end(), [] (const char v) { return (unsigned char)v >= 128; });
 	if (it == string.end())
 		return string; // no need to reencode
 	return string.decode(from).encode(to);
