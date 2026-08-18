@@ -61,6 +61,10 @@ bool SoundManager::playSound(uint32 resId, Audio::Mixer::SoundType type, uint32 
 		new Common::MemoryReadStream(data, e->size, DisposeAfterUse::YES);
 	Audio::RewindableAudioStream *stream = Audio::makeADPCMStream(
 		memory, DisposeAfterUse::YES, e->size, Audio::kADPCMMS, kSampleRate, 1, kBlockAlign);
+	if (!stream) {
+		debugC(kDebugSound, "Failed to create ADPCM stream for sound %08x", resId);
+		return false;
+	}
 
 	// Every pop mixes with the others, as the original DirectSound
 	// buffers do; each keeps its own handle for state queries
@@ -138,6 +142,10 @@ bool SoundManager::playMusic(uint32 resId) {
 		&_musicFile, e->location, e->location + e->size);
 	Audio::RewindableAudioStream *stream = Audio::makeADPCMStream(
 		sub, DisposeAfterUse::YES, e->size, Audio::kADPCMMS, kSampleRate, 1, kBlockAlign);
+	if (!stream) {
+		debugC(kDebugSound, "Failed to create ADPCM stream for music %08x", resId);
+		return false;
+	}
 	g_engine->_mixer->playStream(Audio::Mixer::kMusicSoundType, &_musicHandle,
 		Audio::makeLoopingAudioStream(stream, 0));
 	_currentMusic = resId;

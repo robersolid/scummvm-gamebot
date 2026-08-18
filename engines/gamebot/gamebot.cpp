@@ -737,10 +737,10 @@ Common::Error GamebotEngine::run() {
 			CursorMan.showMouse(!_logic.isBusy());
 		updateCursorImage();
 
-		// Original select mode: the left button held still for 400 ms
+		// Original select mode: the left button held still for 550 ms
 		// over a hot object pops the verb palette under the cursor
 		if (_leftDown && !_verbPalette.isOpen() && _hoverObjectId &&
-				!_linkedObject && millis - _lastMouseEventTime >= 400 &&
+				!_linkedObject && millis - _lastMouseEventTime >= 550 &&
 				!_logic.isBusy() && !_logic.isDialogOpen() &&
 				!_mainMenu.isOpen() && !_inventoryUI.isOpen()) {
 			Common::Point mouse = g_system->getEventManager()->getMousePos();
